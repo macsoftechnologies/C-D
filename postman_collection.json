@@ -1,0 +1,956 @@
+{
+  "info": {
+    "_postman_id": "f14977e9-7d1e-4de1-8577-37bc52c2289e",
+    "name": "Canan Dairy",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "7663482"
+  },
+  "item": [
+    {
+      "name": "Subadmin",
+      "item": [
+        {
+          "name": "Subadmin Create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "admin_name",
+                  "value": "subadmin1",
+                  "type": "text"
+                },
+                {
+                  "key": "email",
+                  "value": "subadmin@gmail.com",
+                  "type": "text"
+                },
+                {
+                  "key": "mobile_number",
+                  "value": "9089098392",
+                  "type": "text"
+                },
+                {
+                  "key": "photo",
+                  "type": "file",
+                  "src": [
+                    "Srr9zgPk6/download.jpg"
+                  ]
+                },
+                {
+                  "key": "address",
+                  "value": "maddilapalem",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "123456",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/subadmincreate",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "subadmincreate"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Subadmin Update",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "admin_name",
+                  "value": "subadmin1",
+                  "type": "text"
+                },
+                {
+                  "key": "email",
+                  "value": "subadmin1@gmail.com",
+                  "type": "text"
+                },
+                {
+                  "key": "mobile_number",
+                  "value": "9089098978",
+                  "type": "text"
+                },
+                {
+                  "key": "photo",
+                  "type": "file",
+                  "src": [
+                    "LokNR23xT/appication.png"
+                  ]
+                },
+                {
+                  "key": "address",
+                  "value": "maddilapalem",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "123456",
+                  "type": "text"
+                },
+                {
+                  "key": "admin_id",
+                  "value": "2",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/subadminupdate",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "subadminupdate"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Subadmin ById",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"admin_id\":3\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/subadminbyid",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "subadminbyid"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Subadmin Delete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"admin_id\":2\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/subadmindelete",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "subadmindelete"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Subadmins",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/getallsubadmins",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "getallsubadmins"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"admin_id\":3,\r\n    \"password\":\"12345\",\r\n    \"newpassword\":\"123456\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/changepassword",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "changepassword"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"email\":\"sesetti9999@gmail.com\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/sendotp",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "sendotp"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Password Or Forgotpassword",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"admin_id\":3,\r\n    \"otp\":\"178557\",\r\n    \"newpassword\":\"12345\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/resetpassword",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "resetpassword"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Farmers",
+      "item": [
+        {
+          "name": "Farmer Create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "farmer_name",
+                  "value": "testing",
+                  "type": "text"
+                },
+                {
+                  "key": "mobile_number",
+                  "value": "8796563421",
+                  "type": "text"
+                },
+                {
+                  "key": "aadhar_number",
+                  "value": "637787678987",
+                  "type": "text"
+                },
+                {
+                  "key": "address",
+                  "value": "visakhapatnam",
+                  "type": "text"
+                },
+                {
+                  "key": "admin_id",
+                  "value": "3",
+                  "type": "text"
+                },
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/farmercreate",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "farmercreate"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Farmer Get by Id",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"farmer_id\":1\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/farmergetbyid",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "farmergetbyid"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Farmer Update",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "farmer_name",
+                  "value": "testing",
+                  "type": "text"
+                },
+                {
+                  "key": "mobile_number",
+                  "value": "8796563421",
+                  "type": "text"
+                },
+                {
+                  "key": "aadhar_number",
+                  "value": "637787678987",
+                  "type": "text"
+                },
+                {
+                  "key": "address",
+                  "value": "visakhapatnam",
+                  "type": "text"
+                },
+                {
+                  "key": "admin_id",
+                  "value": "3",
+                  "type": "text"
+                },
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "farmer_id",
+                  "value": "1",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/farmerupdate",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "farmerupdate"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Admin Idby Farmers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"admin_id\":3\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/getfarmersbyadmin",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "getfarmersbyadmin"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Farmer Delete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"farmer_id\":1\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/farmerdelete",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "farmerdelete"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Animals",
+      "item": [
+        {
+          "name": "Animal Create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "farmer_id",
+                  "value": "2",
+                  "type": "text"
+                },
+                {
+                  "key": "animal_type",
+                  "value": "Cow",
+                  "type": "text"
+                },
+                {
+                  "key": "vaccination_proof",
+                  "type": "file",
+                  "src": [
+                    "K6dvFOltp/appication.png"
+                  ]
+                }
+              ]
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/animalcreate",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "animalcreate"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Animal Update",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "farmer_id",
+                  "value": "2",
+                  "type": "text"
+                },
+                {
+                  "key": "animal_type",
+                  "value": "Cow",
+                  "type": "text"
+                },
+                {
+                  "key": "vaccination_proof",
+                  "type": "file",
+                  "src": [
+                    "K6dvFOltp/appication.png"
+                  ]
+                },
+                {
+                  "key": "animal_id",
+                  "value": "1",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/animalupdate",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "animalupdate"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Animal Get ById",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"animal_id\":1\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/animalgetbyid",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "animalgetbyid"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Farmer Id By Animals",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"farmer_id\":2\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/farmeridbyanimals",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "farmeridbyanimals"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Animal Delete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"animal_id\":1\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/animaldelete",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "animaldelete"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Daily Procurement List",
+      "item": [
+        {
+          "name": "Create Daily Procurement List",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"farmer_id\": 4,\r\n  \"shift\": \"Morning\",\r\n  \"procurements\": [\r\n    {\r\n      \"animal_id\": 2,\r\n      \"fat\": 4.5,\r\n      \"snf\": 8.5,\r\n      \"liters\": 12.5,\r\n      \"rate\": 35.00\r\n    },\r\n    {\r\n      \"animal_id\": 3,\r\n      \"fat\": 7.0,\r\n      \"snf\": 9.0,\r\n      \"liters\": 8.0,\r\n      \"rate\": 45.00\r\n    }\r\n  ]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/createdailyprocurement",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "createdailyprocurement"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Farmer IdBy Procurement List",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"farmer_id\":4\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/procurementbyfarmerid",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "procurementbyfarmerid"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Single Procurement Data",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Auth-Key",
+                "value": "canandairyApi"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"procurement_id\":1\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://macsof.in/milkmanagement/api/procurementbyid",
+              "protocol": "http",
+              "host": [
+                "macsof",
+                "in"
+              ],
+              "path": [
+                "milkmanagement",
+                "api",
+                "procurementbyid"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admins Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Auth-Key",
+            "value": "canandairyApi"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n   \"email\":\"superadmin@gmail.com\",\r\n   \"password\":\"123456\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://macsof.in/milkmanagement/api/login",
+          "protocol": "http",
+          "host": [
+            "macsof",
+            "in"
+          ],
+          "path": [
+            "milkmanagement",
+            "api",
+            "login"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

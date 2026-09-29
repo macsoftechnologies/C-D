@@ -6,15 +6,13 @@ const { width, height } = Dimensions.get("window");
 export default function SplashScreen() {
   return (
     <View style={styles.container}>
-      <Image
-        source={require("../../assets/images/law_logo.jpg")}
+      {/* <Image
+        source={require("./scroll_splash/assets/images/dairy.png")}
         style={styles.image}
         resizeMode="cover"
-      />
+      /> */}
 
-      <Text style={styles.rao}>
-        Welcome to Rao's Law Academy
-      </Text>
+      <Text style={styles.rao}>Welcome to Canaan Dairy</Text>
     </View>
   );
 }
@@ -22,9 +20,9 @@ export default function SplashScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0000",
-    width,
-    height,
+    width: width,
+    height: height,
+    backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -32,14 +30,14 @@ const styles = StyleSheet.create({
   image: {
     width: 200,
     height: 200,
-    borderRadius: 100, 
+    borderRadius: 100,
   },
 
   rao: {
     marginTop: 20,
     fontSize: 20,
-    color: "#1a3c8b",
-    fontWeight: "600", 
+    color: "#1A3C8B",
+    fontWeight: "600",
     textAlign: "center",
   },
 });

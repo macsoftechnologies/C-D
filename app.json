@@ -1,27 +1,24 @@
 {
   "expo": {
-    "name": "Powered by Macsof Technologies",
-    "slug": "law_app",
-    "version": "1.0.0",
+    "name": "Canaan Dairy",
+    "slug": "cannal",
+    "version": "1.0.2",
     "orientation": "portrait",
-    "icon": "./assets/images/advocate.png",
-    "scheme": "lawapp",
+    "icon": "./assets/images/icon.png",
+    "scheme": "cannal",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.cannal"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0000"
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.law_app"
-    },
-    "web": {
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "package": "com.anonymous.cannal",
+      "versionCode": 1
     },
     "plugins": [
       "expo-router",
@@ -31,9 +28,22 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#FFFFFF",
           "dark": {
             "backgroundColor": "#000000"
+          }
+        }
+      ],
+      "expo-font",
+      "expo-image",
+      "expo-sharing",
+      "expo-status-bar",
+      "expo-web-browser",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
           }
         }
       ]
@@ -41,6 +51,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ec856c68-1c49-4276-87a4-86495bd4e2c5"
+      }
     }
   }
 }
