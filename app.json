@@ -1,25 +1,28 @@
 {
   "expo": {
     "name": "Canaan Dairy",
-    "slug": "cannal",
+    "slug": "canaan-dairy",
     "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "cannal",
+    "scheme": "canaandairy",
     "userInterfaceStyle": "automatic",
+
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.cannal"
+      "bundleIdentifier": "com.canaandairy.app"
     },
+
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.cannal",
+      "package": "com.canaandairy.app",
       "versionCode": 1
     },
+
     "plugins": [
       "expo-router",
       [
@@ -48,16 +51,17 @@
         }
       ]
     ],
+
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
+
     "extra": {
       "router": {},
-      "eas": {
-        "projectId": "ec856c68-1c49-4276-87a4-86495bd4e2c5"
-      }
+      "eas": {}
     },
+
     "owner": "v_varsha"
   }
 }
