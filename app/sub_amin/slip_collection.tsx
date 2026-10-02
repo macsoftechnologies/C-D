@@ -4,15 +4,16 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   ActivityIndicator,
   Share,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { getProcurementById, getProcurementByFarmerId } from '@/src/services/dairyApi';
+import { BillSkeleton } from '@/components/Shimmer';
 
 const COLORS = {
   statusBarBg: '#161616',
@@ -165,6 +166,25 @@ Total Amount: ₹${slip.amount}`;
     { label: 'Amount', value: `₹${slip.amount}`, highlight: true },
     { label: 'Time', value: slip.time },
   ];
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.statusBarBg} />
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.85}>
+            <Ionicons name="arrow-back" size={20} color="#fff" />
+          </TouchableOpacity>
+          <View style={styles.headerContent}>
+            <Text style={styles.headerTitle}>Milk Slip</Text>
+            <Text style={styles.headerSubtitle}>Receipt & Verification</Text>
+          </View>
+          <View style={{ width: 22 }} />
+        </View>
+        <BillSkeleton />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>

@@ -8,12 +8,12 @@ import {
   ScrollView,
   Image,
   ActivityIndicator,
-  SafeAreaView,
   Alert,
   KeyboardAvoidingView,
   Platform,
   StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -35,10 +35,6 @@ const COLORS = {
   danger: '#C62828',
   dangerLight: '#FFEBEE',
 };
-
-// Use HTTPS
-const FARMER_CREATE_URL =
-  'http://macsof.in/milkmanagement/api/farmercreate';
 
 interface FormErrors {
   farmer_name?: string;
@@ -84,13 +80,13 @@ export default function SubAdminCreateFarmer() {
     loadAdmin();
   }, [adminId]);
 
-  
+
 
   const handleBack = () => {
     router.back();
   };
 
-  
+
 
   const pickImage = async () => {
     try {
@@ -127,7 +123,7 @@ export default function SubAdminCreateFarmer() {
     }
   };
 
-  
+
   const validate = () => {
     const nextErrors: FormErrors = {};
 
@@ -172,7 +168,7 @@ export default function SubAdminCreateFarmer() {
     );
   };
 
-  
+
 
   const handleCreateFarmer = async () => {
     if (!validate()) {
@@ -325,26 +321,25 @@ export default function SubAdminCreateFarmer() {
 
         Alert.alert(
           'Farmer Created Successfully',
-          `Farmer ID: #${generatedFarmerId || 'N/A'}\n${
-            responseData?.message ||
-            'Farmer has been registered and associated with Sub-Admin #' + adminId
+          `Farmer ID: #${generatedFarmerId || 'N/A'}\n${responseData?.message ||
+          'Farmer has been registered and associated with Sub-Admin #' + adminId
           }`,
           [
             ...(generatedFarmerId
               ? [
-                  {
-                    text: 'View Farmer Overview',
-                    onPress: () => {
-                      router.replace({
-                        pathname: '/sub_amin/farmer_overview' as any,
-                        params: {
-                          farmer_id: String(generatedFarmerId),
-                          admin_id: String(adminId),
-                        },
-                      });
-                    },
+                {
+                  text: 'View Farmer Overview',
+                  onPress: () => {
+                    router.replace({
+                      pathname: '/sub_amin/farmer_overview' as any,
+                      params: {
+                        farmer_id: String(generatedFarmerId),
+                        admin_id: String(adminId),
+                      },
+                    });
                   },
-                ]
+                },
+              ]
               : []),
             {
               text: 'Farmer List',
@@ -366,7 +361,7 @@ export default function SubAdminCreateFarmer() {
         Alert.alert(
           'Registration Failed',
           responseData?.message ||
-            'Could not register farmer.'
+          'Could not register farmer.'
         );
       }
     } catch (error: any) {
@@ -440,7 +435,7 @@ export default function SubAdminCreateFarmer() {
     }
   };
 
-  
+
 
   return (
     <SafeAreaView
@@ -598,7 +593,7 @@ export default function SubAdminCreateFarmer() {
                 style={[
                   styles.inputWrapper,
                   errors.farmer_name &&
-                    styles.inputWrapperError,
+                  styles.inputWrapperError,
                 ]}
               >
                 <Ionicons
@@ -660,7 +655,7 @@ export default function SubAdminCreateFarmer() {
                 style={[
                   styles.inputWrapper,
                   errors.mobile_number &&
-                    styles.inputWrapperError,
+                  styles.inputWrapperError,
                 ]}
               >
                 <Ionicons
@@ -732,7 +727,7 @@ export default function SubAdminCreateFarmer() {
                 style={[
                   styles.inputWrapper,
                   errors.aadhar_number &&
-                    styles.inputWrapperError,
+                  styles.inputWrapperError,
                 ]}
               >
                 <Ionicons
@@ -805,7 +800,7 @@ export default function SubAdminCreateFarmer() {
                   styles.inputWrapper,
                   styles.textAreaWrapper,
                   errors.address &&
-                    styles.inputWrapperError,
+                  styles.inputWrapperError,
                 ]}
               >
                 <Ionicons
@@ -891,9 +886,8 @@ export default function SubAdminCreateFarmer() {
                         COLORS.headline,
                     },
                   ]}
-                  value={`Admin ID: #${
-                    adminId || '...'
-                  }`}
+                  value={`Admin ID: #${adminId || '...'
+                    }`}
                   editable={false}
                 />
               </View>
@@ -907,7 +901,7 @@ export default function SubAdminCreateFarmer() {
             style={[
               styles.submitButton,
               submitting &&
-                styles.submitButtonDisabled,
+              styles.submitButtonDisabled,
             ]}
             activeOpacity={0.85}
             onPress={

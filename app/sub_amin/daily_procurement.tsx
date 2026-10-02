@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   RefreshControl,
@@ -16,6 +15,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { getUserSession, StoredUserData } from '@/src/authStorage';
@@ -23,6 +23,7 @@ import {
   getFarmersByAdmin,
   getProcurementByFarmerId,
   getAnimalsByFarmerId,
+  getFarmerById,
   createDailyProcurement,
   calculateMilkRate,
   calculateTotalMilk,
@@ -30,7 +31,11 @@ import {
   Farmer,
   Animal,
   DailyProcurementDateGroup,
+  ProcurementRecordItem,
+  CreateProcurementPayload,
+  batchAllSettled,
 } from '@/src/services/dairyApi';
+import { DailyProcurementSkeleton } from '@/components/Shimmer';
 
 const COLORS = {
   bg: '#F5F7F4',
@@ -65,7 +70,16 @@ interface FarmerProcurementSummary {
 }
 
 export default function DailyProcurementScreen() {
-  const params = useLocalSearchParams<{ farmer_id?: string }>();
+  const params = useLocalSearchParams<{
+    farmer_id?: string;
+    farmer_name?: string;
+    code?: string;
+    mobile_number?: string;
+    aadhar_number?: string;
+    address?: string;
+    admin_id?: string;
+    open_record?: string;
+  }>();
   const [session, setSession] = useState<StoredUserData | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -86,43 +100,199 @@ export default function DailyProcurementScreen() {
   const [rateInput, setRateInput] = useState('35.00');
   const [savingProcurement, setSavingProcurement] = useState(false);
 
-  // 1. Load Session
+  // 1. Load Session (supports both Super Admin and Sub Admin)
   useEffect(() => {
     async function loadAuth() {
       const stored = await getUserSession();
-      if (!stored) {
-        router.replace('/sub_amin/sub_login');
-        return;
+      if (stored) {
+        setSession(stored);
+      } else {
+        // Fallback session if opened directly or from Super Admin
+        const fallback: StoredUserData = {
+          role: 'super_admin',
+          role_id: '1',
+          admin_id: String(params.admin_id || '1'),
+          admin_name: 'Admin',
+          email: '',
+        };
+        setSession(fallback);
       }
-      setSession(stored);
     }
     loadAuth();
-  }, []);
+  }, [params.admin_id]);
+
+  // Open modal automatically if open_record param is passed
+  useEffect(() => {
+    if (params.farmer_id) {
+      setSelectedFarmerId(String(params.farmer_id));
+      if (params.open_record === 'true') {
+        setAddModalVisible(true);
+      }
+    }
+  }, [params.farmer_id, params.open_record]);
 
   const isLoadingRef = React.useRef(false);
 
   // 2. Fetch All Procurement Data
   const loadData = useCallback(async (force = false) => {
-    if (!session?.admin_id || isLoadingRef.current) return;
+    if (isLoadingRef.current) return;
 
     try {
       isLoadingRef.current = true;
       setLoading(true);
 
-      // Fetch Sub-Admin's farmers
-      const farmerList = await getFarmersByAdmin(session.admin_id, force);
-      setFarmers(farmerList);
+      const targetFarmerId = params.farmer_id ? String(params.farmer_id) : null;
 
-      const targetFarmers = params.farmer_id
-        ? farmerList.filter((f) => String(f.farmer_id) === String(params.farmer_id))
-        : farmerList;
+      if (targetFarmerId) {
+        console.log('====================================');
+        console.log('[PROCUREMENT SCREEN] Loading details for targeted Farmer ID:', targetFarmerId);
+        console.log('====================================');
 
-      const items: FarmerProcurementSummary[] = [];
+        // Parallel fetch for target farmer: details, animals, and procurement list
+        const [farmerRes, animalsRes, procRes] = await Promise.allSettled([
+          getFarmerById(targetFarmerId),
+          getAnimalsByFarmerId(targetFarmerId, force),
+          getProcurementByFarmerId(targetFarmerId, force),
+        ]);
 
-      // Query procurement records for each farmer sequentially to avoid flooding server
-      for (const farmer of targetFarmers) {
-        try {
-          const res = await getProcurementByFarmerId(farmer.farmer_id, force);
+        let resolvedFarmer: Farmer | null = null;
+        if (farmerRes.status === 'fulfilled' && farmerRes.value) {
+          resolvedFarmer = farmerRes.value;
+          console.log('[PROCUREMENT SCREEN] Loaded farmer details:', resolvedFarmer.farmer_name);
+        } else if (procRes.status === 'fulfilled' && procRes.value?.farmer_details) {
+          resolvedFarmer = procRes.value.farmer_details;
+        }
+
+        const effectiveFarmer: Farmer = resolvedFarmer || {
+          farmer_id: targetFarmerId,
+          farmer_name: params.farmer_name || `Farmer #${targetFarmerId}`,
+          code: params.code || `F-${targetFarmerId}`,
+          mobile_number: params.mobile_number || '',
+          aadhar_number: params.aadhar_number || '',
+          address: params.address || '',
+          admin_id: String(params.admin_id || session?.admin_id || ''),
+          status: '1',
+          profile: '',
+          created_at: '',
+          updated_at: '',
+        };
+
+        setFarmers([effectiveFarmer]);
+        setSelectedFarmerId(targetFarmerId);
+
+        if (animalsRes.status === 'fulfilled' && Array.isArray(animalsRes.value)) {
+          console.log('[PROCUREMENT SCREEN] Loaded animals count:', animalsRes.value.length);
+          setFarmerAnimals(animalsRes.value);
+          if (animalsRes.value.length > 0) {
+            setSelectedAnimalId(String(animalsRes.value[0].animal_id));
+            const calculatedRate = calculateMilkRate(
+              parseFloat(fatInput) || 4.5,
+              parseFloat(snfInput) || 8.5,
+              animalsRes.value[0].animal_type
+            );
+            setRateInput(calculatedRate.toFixed(2));
+          }
+        }
+
+        const items: FarmerProcurementSummary[] = [];
+
+        if (procRes.status === 'fulfilled' && procRes.value) {
+          const rawProc = procRes.value;
+          console.log('[PROCUREMENT SCREEN] Procurement response status:', rawProc.status);
+
+          const dataList: any[] = Array.isArray(rawProc.procurement_data)
+            ? rawProc.procurement_data
+            : Array.isArray((rawProc as any).data)
+              ? (rawProc as any).data
+              : [];
+
+          const farmerName = effectiveFarmer.farmer_name || 'Farmer';
+          const farmerCode = effectiveFarmer.code || `F-${targetFarmerId}`;
+
+          dataList.forEach((group: any) => {
+            if (group.morning_shift || group.evening_shift) {
+              const mRecords: ProcurementRecordItem[] = group.morning_shift?.records || [];
+              const eRecords: ProcurementRecordItem[] = group.evening_shift?.records || [];
+              const all = [...mRecords, ...eRecords];
+
+              if (all.length > 0) {
+                const mQty = mRecords.reduce((sum, r) => sum + (parseFloat(r.liters) || 0), 0);
+                const eQty = eRecords.reduce((sum, r) => sum + (parseFloat(r.liters) || 0), 0);
+                const totalLiters = calculateTotalMilk(mQty, eQty);
+
+                const sample = all[0];
+                const rateVal = parseFloat(sample.rate) || 35.0;
+
+                const totalAmt = all.reduce(
+                  (sum, r) =>
+                    sum + (parseFloat(r.amount) || (parseFloat(r.liters) || 0) * (parseFloat(r.rate) || rateVal)),
+                  0
+                );
+
+                items.push({
+                  farmerId: targetFarmerId,
+                  farmerName,
+                  farmerCode,
+                  date: group.date || new Date().toISOString().split('T')[0],
+                  morningQty: Number(mQty.toFixed(2)),
+                  eveningQty: Number(eQty.toFixed(2)),
+                  totalQty: Number(totalLiters.toFixed(2)),
+                  fat: sample.fat || '4.50',
+                  snf: sample.snf || '8.50',
+                  rate: rateVal.toFixed(2),
+                  totalAmount: totalAmt.toFixed(2),
+                  procurementId: sample.procurement_id,
+                });
+              }
+            } else if (group.liters !== undefined || group.fat !== undefined) {
+              const liters = parseFloat(group.liters) || 0;
+              const rateVal = parseFloat(group.rate) || 35.0;
+              const totalAmt = parseFloat(group.amount) || liters * rateVal;
+              const isMorning = group.shift === 'Morning';
+
+              items.push({
+                farmerId: targetFarmerId,
+                farmerName,
+                farmerCode,
+                date: group.created_at ? group.created_at.split(' ')[0] : group.date || new Date().toISOString().split('T')[0],
+                morningQty: isMorning ? Number(liters.toFixed(2)) : 0,
+                eveningQty: !isMorning ? Number(liters.toFixed(2)) : 0,
+                totalQty: Number(liters.toFixed(2)),
+                fat: String(group.fat || '4.50'),
+                snf: String(group.snf || '8.50'),
+                rate: rateVal.toFixed(2),
+                totalAmount: totalAmt.toFixed(2),
+                procurementId: group.procurement_id,
+              });
+            }
+          });
+        }
+
+        items.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        setProcurementItems(items);
+      } else {
+        // Mode 2: General Admin Procurement View (when no specific farmer_id passed)
+        const adminIdToUse = session?.admin_id || params.admin_id || '1';
+        console.log('[PROCUREMENT SCREEN] Fetching general farmer list for admin_id:', adminIdToUse);
+
+        const farmerList = await getFarmersByAdmin(adminIdToUse, force);
+        setFarmers(farmerList);
+
+        const items: FarmerProcurementSummary[] = [];
+
+        const settledResults = await batchAllSettled(
+          farmerList,
+          async (farmer) => {
+            const res = await getProcurementByFarmerId(farmer.farmer_id, force);
+            return { farmer, res };
+          },
+          6
+        );
+
+        for (const itemResult of settledResults) {
+          if (itemResult.status !== 'fulfilled') continue;
+          const { farmer, res } = itemResult.value;
+
           const isOk =
             (res.status === 200 || (res.status as any) === '200' || (res.status as any) === true) &&
             Array.isArray(res.procurement_data);
@@ -141,7 +311,8 @@ export default function DailyProcurementScreen() {
                 const rateVal = parseFloat(sample.rate) || 35.0;
 
                 const totalAmt = all.reduce(
-                  (sum, r) => sum + (parseFloat(r.amount) || (parseFloat(r.liters) || 0) * (parseFloat(r.rate) || rateVal)),
+                  (sum, r) =>
+                    sum + (parseFloat(r.amount) || (parseFloat(r.liters) || 0) * (parseFloat(r.rate) || rateVal)),
                   0
                 );
 
@@ -162,30 +333,23 @@ export default function DailyProcurementScreen() {
               }
             });
           }
-        } catch (e) {
-          // Ignore single farmer procurement fetch error
         }
-        // Small delay between farmer requests to give server breathing room
-        await new Promise((r) => setTimeout(r, 50));
-      }
 
-      // Sort by date descending
-      items.sort((a, b) => b.date.localeCompare(a.date));
-      setProcurementItems(items);
+        items.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        setProcurementItems(items);
+      }
     } catch (err) {
-      console.log('Error loading procurement data:', err);
+      console.log('[PROCUREMENT SCREEN ERROR]:', err);
     } finally {
       isLoadingRef.current = false;
       setLoading(false);
     }
-  }, [session?.admin_id, params.farmer_id]);
+  }, [session?.admin_id, params.farmer_id, params.farmer_name, params.code, params.admin_id, fatInput, snfInput]);
 
   useFocusEffect(
     useCallback(() => {
-      if (session?.admin_id) {
-        loadData(false);
-      }
-    }, [session?.admin_id, loadData])
+      loadData(false);
+    }, [loadData])
   );
 
   const handleRefresh = async () => {
@@ -234,7 +398,7 @@ export default function DailyProcurementScreen() {
     }
   };
 
-  // Submit Daily Procurement
+  // Submit Daily Procurement (Matches Postman POST /api/createdailyprocurement)
   const handleSaveProcurement = async () => {
     if (!selectedFarmerId) {
       Alert.alert('Validation Error', 'Please select a farmer.');
@@ -253,7 +417,7 @@ export default function DailyProcurementScreen() {
 
     setSavingProcurement(true);
     try {
-      const payload = {
+      const payload: CreateProcurementPayload = {
         farmer_id: Number(selectedFarmerId),
         shift: selectedShift,
         procurements: [
@@ -267,13 +431,25 @@ export default function DailyProcurementScreen() {
         ],
       };
 
+      console.log('====================================');
+      console.log('[RECORD PROCUREMENT] Submitting Daily Procurement:');
+      console.log('Endpoint: POST /api/createdailyprocurement');
+      console.log('Headers: { "Auth-Key": "canandairyApi" }');
+      console.log('Payload:', JSON.stringify(payload, null, 2));
+      console.log('====================================');
+
       const res = await createDailyProcurement(payload);
-      const isSuccess = res.status === 200 || (res as any).status === '200' || (res as any).status === true;
+      console.log('[RECORD PROCUREMENT] Response:', res);
+
+      const isSuccess =
+        res.status === 200 ||
+        (res as any).status === '200' ||
+        (res as any).status === true;
 
       if (isSuccess) {
         Alert.alert(
           'Success',
-          'Milk procurement recorded successfully!',
+          res.message || 'Milk procurement recorded successfully!',
           [
             {
               text: 'View Milk Bill',
@@ -291,7 +467,7 @@ export default function DailyProcurementScreen() {
               text: 'Done',
               onPress: () => {
                 setAddModalVisible(false);
-                loadData();
+                loadData(true);
               },
             },
           ]
@@ -302,8 +478,13 @@ export default function DailyProcurementScreen() {
         Alert.alert('Failed', res.message || 'Unable to record daily procurement.');
       }
     } catch (err: any) {
-      console.log('Error creating procurement:', err);
-      Alert.alert('Error', err?.response?.data?.message || 'Network error while recording procurement.');
+      console.log('[RECORD PROCUREMENT ERROR]:', err);
+      const errMsg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        'Network error while recording procurement.';
+      Alert.alert('Error', errMsg);
     } finally {
       setSavingProcurement(false);
     }
@@ -345,7 +526,11 @@ export default function DailyProcurementScreen() {
         <View style={styles.headerTitleWrap}>
           <Text style={styles.headerTitle}>Daily Milk Procurement</Text>
           <Text style={styles.headerSubtitle}>
-            {params.farmer_id ? `Farmer #${params.farmer_id}` : `Sub-Admin #${session?.admin_id || '-'}`}
+            {params.farmer_name
+              ? `${params.farmer_name} (#${params.farmer_id})`
+              : params.farmer_id
+                ? `Farmer #${params.farmer_id}`
+                : `Sub-Admin #${session?.admin_id || '-'}`}
           </Text>
         </View>
 
@@ -405,10 +590,7 @@ export default function DailyProcurementScreen() {
 
       {/* Content List */}
       {loading && procurementItems.length === 0 ? (
-        <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color={COLORS.brandGreen} />
-          <Text style={styles.loadingText}>Fetching procurement records from backend...</Text>
-        </View>
+        <DailyProcurementSkeleton />
       ) : filteredList.length === 0 ? (
         <View style={styles.emptyBox}>
           <MaterialCommunityIcons name="water-outline" size={48} color={COLORS.labelText} />

@@ -8,17 +8,18 @@ import {
   ScrollView,
   Image,
   ActivityIndicator,
-  SafeAreaView,
   Alert,
   KeyboardAvoidingView,
   Platform,
   StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { getUserSession } from '@/src/authStorage';
 import { getFarmerById, updateFarmer, invalidateFarmerCache } from '@/src/services/dairyApi';
+import { FarmerOverviewSkeleton } from '@/components/Shimmer';
 
 interface Farmer {
   farmer_id: string;
@@ -252,7 +253,7 @@ export default function SubAdminUpdateFarmer() {
 
       if (isSuccess) {
         invalidateFarmerCache();
-        Alert.alert('Success', response.data?.message || 'Farmer updated successfully.', [
+        Alert.alert('Success', response?.message || 'Farmer updated successfully.', [
           {
             text: 'OK',
             onPress: () => router.back(),
@@ -261,7 +262,7 @@ export default function SubAdminUpdateFarmer() {
       } else {
         Alert.alert(
           'Update Failed',
-          response.data?.message || 'Could not update farmer. Please try again.'
+          response?.message || 'Could not update farmer. Please try again.'
         );
       }
     } catch (err: any) {
@@ -279,7 +280,7 @@ export default function SubAdminUpdateFarmer() {
     }
   };
 
-  if (loading) {
+  if (loading && !farmer) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor={COLORS.statusBarBg} />
@@ -293,10 +294,7 @@ export default function SubAdminUpdateFarmer() {
           </View>
         </View>
 
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={COLORS.brandGreen} />
-          <Text style={styles.loadingText}>Loading farmer information...</Text>
-        </View>
+        <FarmerOverviewSkeleton />
       </SafeAreaView>
     );
   }

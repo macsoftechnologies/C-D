@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  SafeAreaView,
   StatusBar,
   Image,
   KeyboardAvoidingView,
@@ -14,11 +13,15 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
   ActivityIndicator,
+  Modal,
+  Alert,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import axios from "axios";
+import { Ionicons } from "@expo/vector-icons";
 import Toast from "react-native-toast-message";
-import { saveUserSession, resolveRole } from "../../src/authStorage"; // adjust this path to match your project structure
+import { saveUserSession, resolveRole } from "../../src/authStorage";
+import { loginAdmin, sendOtp, resetPassword } from "@/src/services/dairyApi";
 
 const COLORS = {
   bg: "#FFFFFF",
@@ -40,6 +43,16 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  // Forgot Password Modal State
+  const [forgotModalVisible, setForgotModalVisible] = useState(false);
+  const [forgotStep, setForgotStep] = useState<1 | 2>(1);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotAdminId, setForgotAdminId] = useState("");
+  const [forgotOtp, setForgotOtp] = useState("");
+  const [forgotNewPassword, setForgotNewPassword] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState("");
 
   const handleLogin = async () => {
     Keyboard.dismiss();
@@ -70,42 +83,21 @@ export default function LoginScreen() {
       setIsLoading(true);
       setError("");
 
-      // Exact Postman Request specification:
-      // POST http://macsof.in/milkmanagement/api/login
-      // Headers: { "Auth-Key": "canandairyApi", "Content-Type": "application/json" }
-      // Body: JSON string { "email": "...", "password": "..." }
-      // Backend validates 'email' for both email and mobile number
-      const requestBody = JSON.stringify({
-        email: trimmedInput,
-        password: trimmedPassword,
-      });
+      const response = await loginAdmin(trimmedInput, trimmedPassword);
 
-      const response = await axios.post(
-        "http://macsof.in/milkmanagement/api/login",
-        requestBody,
-        {
-          headers: {
-            "Auth-Key": "canandairyApi",
-            "Content-Type": "application/json",
-            Accept: "application/json, text/plain, */*",
-          },
-          timeout: 20000,
-        }
-      );
-
-      console.log("Login response:", response.data);
+      console.log("Login response:", response);
 
       const isSuccess =
-        response.data?.status === 200 ||
-        response.data?.status === "200" ||
-        response.data?.status === true;
+        response?.status === 200 ||
+        (response?.status as any) === "200" ||
+        (response?.status as any) === true;
 
       // SUCCESS
       if (isSuccess) {
-        const userdata = response.data?.userdata || {};
+        const userdata: any = response?.userdata || {};
         const rawRoleId = String(
           userdata?.role_id ??
-          response.data?.role_id ??
+          response?.role_id ??
           userdata?.role ??
           "1"
         ).trim();
@@ -141,50 +133,118 @@ export default function LoginScreen() {
           router.replace("/sub_amin/admin_dashboard");
         }
       } else {
-        const message =
-          response.data?.message ||
-          response.data?.error ||
-          "Invalid Details, Please enter proper details";
-        setError(message);
+        const msg =
+          response?.message ||
+          "Invalid login credentials. Please verify your details.";
+        setError(msg);
+
         Toast.show({
           type: "error",
-          text1: "Login Failed",
-          text2: message,
+          text1: "Authentication Error",
+          text2: msg,
           position: "top",
           visibilityTime: 3000,
         });
       }
     } catch (err: any) {
       console.log("Login error:", err);
-
-      let errorMessage = "Something went wrong. Please try again.";
-
-      if (err?.response) {
-        console.log("API status:", err.response.status);
-        console.log("API response:", err.response.data);
-
-        errorMessage =
-          err.response.data?.message ||
-          err.response.data?.error ||
-          `Server error (${err.response.status})`;
-      } else if (err?.request) {
-        errorMessage =
-          "Unable to connect to the server. Please check your internet connection.";
-      } else if (err?.message) {
-        errorMessage = err.message;
-      }
-
-      setError(errorMessage);
+      const errMsg =
+        err?.response?.data?.message ||
+        err?.message ||
+        "Unable to connect to the server. Please check your network connection.";
+      setError(errMsg);
 
       Toast.show({
         type: "error",
-        text1: "Login Failed",
-        text2: errorMessage,
+        text1: "Network Error",
+        text2: errMsg,
         position: "top",
-        visibilityTime: 3500,
+        visibilityTime: 3000,
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Handle Send OTP for Forgot Password
+  const handleSendOtp = async () => {
+    if (!forgotEmail.trim()) {
+      setForgotError("Please enter your registered email address.");
+      return;
+    }
+
+    setForgotLoading(true);
+    setForgotError("");
+
+    try {
+      const res = await sendOtp(forgotEmail.trim());
+      const isOk =
+        res?.status === 200 ||
+        (res?.status as any) === "200" ||
+        (res?.status as any) === true;
+
+      if (isOk) {
+        setForgotAdminId(String(res?.admin_id || ""));
+        setForgotStep(2);
+        Alert.alert("OTP Sent", res?.message || "OTP has been sent to your email.");
+      } else {
+        setForgotError(res?.message || "Email address not registered.");
+      }
+    } catch (err: any) {
+      setForgotError(err?.message || "Failed to send OTP.");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  // Handle Reset Password with OTP
+  const handleResetPassword = async () => {
+    if (!forgotOtp.trim()) {
+      setForgotError("Please enter the 6-digit OTP received on your email.");
+      return;
+    }
+    if (!forgotNewPassword.trim() || forgotNewPassword.trim().length < 6) {
+      setForgotError("New password must be at least 6 characters.");
+      return;
+    }
+
+    setForgotLoading(true);
+    setForgotError("");
+
+    try {
+      const res = await resetPassword(
+        forgotAdminId,
+        forgotOtp.trim(),
+        forgotNewPassword.trim()
+      );
+
+      const isOk =
+        res?.status === 200 ||
+        (res?.status as any) === "200" ||
+        (res?.status as any) === true;
+
+      if (isOk) {
+        Alert.alert(
+          "Password Reset",
+          res?.message || "Your password has been reset successfully. Please log in.",
+          [
+            {
+              text: "Log In",
+              onPress: () => {
+                setEmail(forgotEmail.trim());
+                setPassword(forgotNewPassword.trim());
+                setForgotModalVisible(false);
+              },
+            },
+          ]
+        );
+      } else {
+        setForgotError(res?.message || "Invalid OTP provided.");
+      }
+    } catch (err: any) {
+      setForgotError(err?.message || "Failed to reset password.");
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -269,6 +329,23 @@ export default function LoginScreen() {
               />
             </View>
 
+            {/* Forgot Password Link */}
+            <View style={{ alignItems: "flex-end", marginTop: -6, marginBottom: 16 }}>
+              <TouchableOpacity
+                onPress={() => {
+                  setForgotModalVisible(true);
+                  setForgotStep(1);
+                  setForgotEmail(email.trim());
+                  setForgotError("");
+                }}
+                disabled={isLoading}
+              >
+                <Text style={{ color: COLORS.brandGreen, fontSize: 13, fontWeight: "600" }}>
+                  Forgot Password?
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             {/* Error */}
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -317,6 +394,126 @@ export default function LoginScreen() {
           </ScrollView>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+
+      {/* Forgot Password Modal */}
+      <Modal
+        visible={forgotModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setForgotModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {forgotStep === 1 ? "Reset Password" : "Enter Verification OTP"}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setForgotModalVisible(false)}
+                style={styles.modalCloseBtn}
+              >
+                <Ionicons name="close" size={22} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            {forgotStep === 1 ? (
+              <View>
+                <Text style={styles.modalSubtitle}>
+                  Enter your registered email address. We will send a 6-digit OTP to reset your password.
+                </Text>
+
+                <Text style={styles.label}>Registered Email</Text>
+                <TextInput
+                  value={forgotEmail}
+                  onChangeText={(t) => {
+                    setForgotEmail(t);
+                    setForgotError("");
+                  }}
+                  placeholder="e.g. sesetti9999@gmail.com"
+                  placeholderTextColor={COLORS.fieldPlaceholder}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  style={styles.modalInput}
+                />
+
+                {forgotError ? <Text style={styles.modalErrorText}>{forgotError}</Text> : null}
+
+                <TouchableOpacity
+                  style={[styles.modalSubmitBtn, forgotLoading && { opacity: 0.7 }]}
+                  onPress={handleSendOtp}
+                  disabled={forgotLoading}
+                >
+                  {forgotLoading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.modalSubmitBtnText}>Send Verification OTP</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View>
+                <Text style={styles.modalSubtitle}>
+                  Enter the 6-digit OTP sent to {forgotEmail} and choose your new password.
+                </Text>
+
+                <Text style={styles.label}>6-Digit OTP</Text>
+                <TextInput
+                  value={forgotOtp}
+                  onChangeText={(t) => {
+                    setForgotOtp(t);
+                    setForgotError("");
+                  }}
+                  placeholder="Enter 6-digit OTP"
+                  placeholderTextColor={COLORS.fieldPlaceholder}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  style={styles.modalInput}
+                />
+
+                <Text style={[styles.label, { marginTop: 12 }]}>New Password</Text>
+                <TextInput
+                  value={forgotNewPassword}
+                  onChangeText={(t) => {
+                    setForgotNewPassword(t);
+                    setForgotError("");
+                  }}
+                  placeholder="Minimum 6 characters"
+                  placeholderTextColor={COLORS.fieldPlaceholder}
+                  secureTextEntry
+                  style={styles.modalInput}
+                />
+
+                {forgotError ? <Text style={styles.modalErrorText}>{forgotError}</Text> : null}
+
+                <TouchableOpacity
+                  style={[styles.modalSubmitBtn, forgotLoading && { opacity: 0.7 }]}
+                  onPress={handleResetPassword}
+                  disabled={forgotLoading}
+                >
+                  {forgotLoading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.modalSubmitBtnText}>Update Password</Text>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{ alignSelf: "center", marginTop: 14 }}
+                  onPress={() => setForgotStep(1)}
+                  disabled={forgotLoading}
+                >
+                  <Text style={{ color: COLORS.brandGreen, fontSize: 13, fontWeight: "600" }}>
+                    ← Change Email or Resend OTP
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -420,5 +617,67 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#2E7D32",
     fontWeight: "700",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
+  },
+  modalCard: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 22,
+    paddingTop: 20,
+    paddingBottom: Platform.OS === "ios" ? 40 : 25,
+    maxHeight: "90%",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: COLORS.headline,
+  },
+  modalCloseBtn: {
+    padding: 6,
+  },
+  modalSubtitle: {
+    fontSize: 13.5,
+    color: COLORS.subtitle,
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  modalInput: {
+    backgroundColor: COLORS.fieldBg,
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    height: 50,
+    fontSize: 14.5,
+    color: COLORS.textDark,
+    marginBottom: 14,
+  },
+  modalErrorText: {
+    color: COLORS.error,
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 12,
+  },
+  modalSubmitBtn: {
+    backgroundColor: COLORS.brandGreen,
+    borderRadius: 12,
+    height: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 6,
+  },
+  modalSubmitBtnText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
   },
 });

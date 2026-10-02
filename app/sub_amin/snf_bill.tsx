@@ -4,13 +4,13 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   ActivityIndicator,
   Share,
   TextInput,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
@@ -22,6 +22,7 @@ import {
   calculateTotalAmount,
   Farmer,
 } from '@/src/services/dairyApi';
+import { BillSkeleton } from '@/components/Shimmer';
 
 const COLORS = {
   bg: '#F5F7F4',
@@ -240,10 +241,7 @@ Verified via Canaan Dairy Backend`;
           <Text style={styles.headerTitle}>SNF Calculation Bill</Text>
           <View style={{ width: 22 }} />
         </View>
-        <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color={COLORS.brandGreen} />
-          <Text style={styles.loadingText}>Loading SNF Calculation Report...</Text>
-        </View>
+        <BillSkeleton />
       </SafeAreaView>
     );
   }

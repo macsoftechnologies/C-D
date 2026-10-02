@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   TextInput,
   Image,
@@ -14,16 +13,12 @@ import {
   Platform,
   useWindowDimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import axios from 'axios';
-
-const GET_SUB_ADMIN_URL =
-  'http://macsof.in/milkmanagement/api/subadminbyid';
-
-const UPDATE_SUB_ADMIN_URL =
-  'http://macsof.in/milkmanagement/api/subadminupdate';
+import { getSubadminById, updateSubadmin, deleteSubadmin } from '@/src/services/dairyApi';
+import { AdminOverviewSkeleton } from '@/components/Shimmer';
 
 interface AdminDetails {
   admin_id: string;
@@ -46,6 +41,7 @@ export default function UpdateSubAdmin() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [adminDetails, setAdminDetails] =
     useState<AdminDetails | null>(null);
@@ -55,6 +51,7 @@ export default function UpdateSubAdmin() {
   const [email, setEmail] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [address, setAddress] = useState('');
+  const [password, setPassword] = useState('');
   const [roleId, setRoleId] = useState('');
   const [status, setStatus] = useState('1');
 
@@ -75,30 +72,10 @@ export default function UpdateSubAdmin() {
     try {
       setLoading(true);
 
-      const response = await axios.post(
-        GET_SUB_ADMIN_URL,
-        {
-          admin_id: admin_id,
-        },
-        {
-          headers: {
-            'Auth-Key': 'canandairyApi',
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const data = await getSubadminById(admin_id);
 
-      console.log('Admin Details:', response.data);
-
-      if (
-        response.data?.status === 200 &&
-        response.data?.data
-      ) {
-        const data = Array.isArray(response.data.data)
-          ? response.data.data[0]
-          : response.data.data;
-
-        setAdminDetails(data);
+      if (data) {
+        setAdminDetails(data as AdminDetails);
 
         setAdminName(data.admin_name || '');
         setEmail(data.email || '');
@@ -225,51 +202,35 @@ export default function UpdateSubAdmin() {
     try {
       setSaving(true);
 
-      /*
-       * NOTE:
-       * This sends the selected local image URI as "photo".
-       *
-       * If your backend requires actual multipart image upload,
-       * use FormData instead. See note below.
-       */
-      const response = await axios.post(
-        UPDATE_SUB_ADMIN_URL,
-        {
-          admin_id: admin_id,
+      const formData = new FormData();
+      formData.append('admin_id', String(admin_id));
+      formData.append('admin_name', adminName.trim());
+      formData.append('email', email.trim());
+      formData.append('mobile_number', mobileNumber.trim());
+      formData.append('address', address.trim());
+      if (password.trim()) {
+        formData.append('password', password.trim());
+      }
+      if (selectedImage && selectedImage !== photo) {
+        const filename = selectedImage.split('/').pop() || 'photo.jpg';
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : 'image/jpeg';
+        formData.append('photo', {
+          uri: selectedImage,
+          name: filename,
+          type: type,
+        } as any);
+      }
 
-          admin_name: adminName.trim(),
+      const response = await updateSubadmin(formData);
 
-          email: email.trim(),
-
-          mobile_number: mobileNumber.trim(),
-
-          address: address.trim(),
-
-          photo:
-            selectedImage ||
-            photo ||
-            '',
-
-          role_id: roleId,
-
-          status: status,
-        },
-        {
-          headers: {
-            'Auth-Key': 'canandairyApi',
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      console.log(
-        'Update Response:',
-        response.data
-      );
+      console.log('Update Response:', response);
 
       if (
-        response.data?.status === 200 ||
-        response.data?.status === 201
+        response?.status === 200 ||
+        response?.status === '200' ||
+        response?.status === 201 ||
+        response?.status === true
       ) {
         Alert.alert(
           'Success',
@@ -286,15 +247,11 @@ export default function UpdateSubAdmin() {
       } else {
         Alert.alert(
           'Update Failed',
-          response.data?.message ||
-            'Unable to update admin details.'
+          response?.message || 'Unable to update admin details.'
         );
       }
     } catch (error) {
-      console.log(
-        'Update Admin Error:',
-        error
-      );
+      console.log('Update Admin Error:', error);
 
       Alert.alert(
         'Error',
@@ -303,6 +260,48 @@ export default function UpdateSubAdmin() {
     } finally {
       setSaving(false);
     }
+  };
+
+  /*
+   * Delete Admin
+   */
+  const handleDeleteSubadmin = () => {
+    if (!admin_id) return;
+    Alert.alert(
+      'Delete Sub Admin',
+      `Are you sure you want to delete "${adminName || 'this Sub Admin'}"? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setDeleting(true);
+              const res = await deleteSubadmin(admin_id);
+              if (
+                res?.status === 200 ||
+                res?.status === '200' ||
+                res?.status === true
+              ) {
+                Alert.alert('Success', 'Sub Admin deleted successfully.', [
+                  {
+                    text: 'OK',
+                    onPress: () => router.replace('/super_admin/super'),
+                  },
+                ]);
+              } else {
+                Alert.alert('Error', res?.message || 'Failed to delete Sub Admin.');
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Failed to delete Sub Admin.');
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   /*
@@ -320,16 +319,14 @@ export default function UpdateSubAdmin() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator
-            size="large"
-            color="#4CAF50"
-          />
-
-          <Text style={styles.loadingText}>
-            Loading admin details...
-          </Text>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#161616" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Edit Sub Admin</Text>
+          <View style={{ width: 40 }} />
         </View>
+        <AdminOverviewSkeleton />
       </SafeAreaView>
     );
   }
@@ -529,6 +526,30 @@ export default function UpdateSubAdmin() {
               </View>
             </View>
 
+            {/* Password (Optional for update) */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>
+                Password (Optional - leave blank to keep unchanged)
+              </Text>
+
+              <View style={styles.inputContainer}>
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={18}
+                  color="#777"
+                />
+
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Enter new password to update"
+                  placeholderTextColor="#aaa"
+                  style={styles.input}
+                  secureTextEntry
+                />
+              </View>
+            </View>
+
             {/* Address */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>
@@ -676,11 +697,11 @@ export default function UpdateSubAdmin() {
           <TouchableOpacity
             style={[
               styles.saveButton,
-              saving &&
+              (saving || deleting) &&
                 styles.saveButtonDisabled,
             ]}
             onPress={handleUpdateAdminDetails}
-            disabled={saving}
+            disabled={saving || deleting}
             activeOpacity={0.85}
           >
             {saving ? (
@@ -705,6 +726,26 @@ export default function UpdateSubAdmin() {
                 <Text style={styles.saveButtonText}>
                   Save Changes
                 </Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* Delete Button */}
+          <TouchableOpacity
+            style={[
+              styles.deleteButton,
+              deleting && styles.deleteButtonDisabled,
+            ]}
+            onPress={handleDeleteSubadmin}
+            disabled={saving || deleting}
+            activeOpacity={0.85}
+          >
+            {deleting ? (
+              <ActivityIndicator size="small" color="#F44336" />
+            ) : (
+              <>
+                <Ionicons name="trash-outline" size={19} color="#D32F2F" />
+                <Text style={styles.deleteButtonText}>Delete Sub Admin</Text>
               </>
             )}
           </TouchableOpacity>
@@ -1056,6 +1097,30 @@ const styles = StyleSheet.create({
 
   saveButtonText: {
     color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  /* Delete */
+  deleteButton: {
+    height: 48,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: '#FFCDD2',
+    backgroundColor: '#FFEBEE',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+
+  deleteButtonDisabled: {
+    opacity: 0.6,
+  },
+
+  deleteButtonText: {
+    color: '#D32F2F',
     fontSize: 14,
     fontWeight: '700',
   },

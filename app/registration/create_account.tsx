@@ -6,11 +6,14 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  SafeAreaView,
   StatusBar,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { createSubadmin } from "@/src/services/dairyApi";
 
 const COLORS = {
   bg: "#FFFFFF",
@@ -47,6 +50,7 @@ export default function RegisterScreen({
   const [password, setPassword] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
@@ -56,18 +60,54 @@ export default function RegisterScreen({
       next.mobile = "Enter a valid 10-digit mobile number";
     if (email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim()))
       next.email = "Enter a valid email address";
-    if (password.length < 8)
-      next.password = "Password must be at least 8 characters";
+    if (password.length < 6)
+      next.password = "Password must be at least 6 characters";
     if (!agreed) next.agreed = "You must agree to the Terms and Privacy Policy";
 
     setErrors(next);
     return Object.keys(next).length === 0;
   };
 
-  const handleCreateAccount = () => {
-    if (!validate()) return;
-    onCreateAccount?.({ fullName, mobile, email, password });
-    router.push("/registration/login");
+  const handleCreateAccount = async () => {
+    if (!validate() || isSubmitting) return;
+
+    setIsSubmitting(true);
+    try {
+      const emailValue = email.trim() || `${mobile.trim()}@canandairy.com`;
+      const res = await createSubadmin({
+        admin_name: fullName.trim(),
+        email: emailValue,
+        mobile_number: mobile.trim(),
+        address: "Registered User",
+        password: password.trim(),
+      });
+
+      const isSuccess =
+        res?.status === 200 ||
+        (res?.status as any) === "200" ||
+        res?.status === 201 ||
+        (res?.status as any) === true;
+
+      if (isSuccess) {
+        onCreateAccount?.({ fullName, mobile, email: emailValue, password });
+        Alert.alert(
+          "Account Created",
+          "Your account has been registered successfully. You can now log in.",
+          [
+            {
+              text: "Log In",
+              onPress: () => router.replace("/registration/login"),
+            },
+          ]
+        );
+      } else {
+        Alert.alert("Registration Failed", res?.message || "Could not register account. Please try again.");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err?.message || "Something went wrong. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSignIn = () => {
@@ -149,11 +189,16 @@ export default function RegisterScreen({
         {errors.agreed ? <Text style={styles.errorText}>{errors.agreed}</Text> : null}
 
         <TouchableOpacity
-          style={styles.createButton}
+          style={[styles.createButton, isSubmitting && { opacity: 0.7 }]}
           activeOpacity={0.85}
           onPress={handleCreateAccount}
+          disabled={isSubmitting}
         >
-          <Text style={styles.createButtonText}>Create account</Text>
+          {isSubmitting ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.createButtonText}>Create account</Text>
+          )}
         </TouchableOpacity>
 
         <View style={styles.signInRow}>

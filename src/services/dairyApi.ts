@@ -1,47 +1,29 @@
-import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
+import axios from 'axios';
 
-// Base API Configuration
-export const BASE_API_URL = 'http://macsof.in/milkmanagement/api';
+// Base API Configuration matching Postman collection
+export const BASE_API_URL = 'https://macsof.in/milkmanagement/api';
 export const AUTH_KEY = 'canandairyApi';
-
-// ----------------------------------------------------
-// LOGGER HELPER
-// ----------------------------------------------------
-function logApiRequest(url: string, method: string, dataOrParams: any) {
-  console.log('====================================');
-  console.log(`[API REQUEST] ${method.toUpperCase()} ${url}`);
-  console.log('Headers: { "Auth-Key": "' + AUTH_KEY + '" }');
-  if (dataOrParams instanceof FormData) {
-    console.log('Body: [FormData payload]');
-  } else {
-    console.log('Body/Params:', JSON.stringify(dataOrParams, null, 2));
-  }
-  console.log('====================================');
-}
-
-function logApiResponse(url: string, status: number, data: any) {
-  console.log('====================================');
-  console.log(`[API RESPONSE] Status: ${status} ${url}`);
-  console.log('Response Data:', JSON.stringify(data, null, 2));
-  console.log('====================================');
-}
-
-function logApiError(url: string, error: any) {
-  console.log('====================================');
-  console.log(`[API ERROR] ${url}`);
-  if (error?.response) {
-    console.log('Status:', error.response.status);
-    console.log('Data:', JSON.stringify(error.response.data, null, 2));
-  } else if (error?.request) {
-    console.log('No response received from server.');
-  } else {
-    console.log('Error Message:', error?.message);
-  }
-  console.log('====================================');
-}
 
 export const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36 CanaanDairyApp';
+
+/**
+ * Normalizes image and media URLs.
+ * Automatically upgrades HTTP URLs from backend database to HTTPS so Android and iOS
+ * security policies do not reject them with Cleartext/Android internal error.
+ */
+export function normalizeImageUrl(url?: string | null): string {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return '';
+  if (trimmed.startsWith('http://macsof.in')) {
+    return trimmed.replace('http://macsof.in', 'https://macsof.in');
+  }
+  if (trimmed.startsWith('http://')) {
+    return trimmed.replace('http://', 'https://');
+  }
+  return trimmed;
+}
 
 // Global axios defaults ensure ANY direct axios call in the app also inherits proper headers
 axios.defaults.headers.common['Auth-Key'] = AUTH_KEY;
@@ -53,46 +35,40 @@ axios.defaults.headers.common['User-Agent'] = DEFAULT_USER_AGENT;
 // ----------------------------------------------------
 export const apiClient = axios.create({
   baseURL: BASE_API_URL,
-  timeout: 20000,
+  timeout: 25000,
   headers: {
     'Auth-Key': AUTH_KEY,
     'User-Agent': DEFAULT_USER_AGENT,
+    'Content-Type': 'application/json',
     Accept: 'application/json, text/plain, */*',
   },
 });
 
-apiClient.interceptors.request.use((config) => {
-  config.headers = config.headers || {};
-  config.headers['Auth-Key'] = AUTH_KEY;
-  config.headers['User-Agent'] = DEFAULT_USER_AGENT;
-  if (!config.headers['Accept']) {
-    config.headers['Accept'] = 'application/json, text/plain, */*';
-  }
-  logApiRequest(`${config.baseURL || ''}${config.url || ''}`, config.method || 'GET', config.data || config.params);
-  return config;
-});
+apiClient.interceptors.request.use(
+  (config) => {
+    config.headers = config.headers || {};
+    config.headers['Auth-Key'] = AUTH_KEY;
+    config.headers['User-Agent'] = DEFAULT_USER_AGENT;
+    if (!config.headers['Accept']) {
+      config.headers['Accept'] = 'application/json, text/plain, */*';
+    }
+    // Only set Content-Type to application/json if data is NOT FormData
+    if (!(config.data instanceof FormData) && !config.headers['Content-Type']) {
+      config.headers['Content-Type'] = 'application/json';
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 apiClient.interceptors.response.use(
-  (response) => {
-    logApiResponse(response.config.url || '', response.status, response.data);
-    return response;
-  },
-  async (error) => {
-    logApiError(error.config?.url || '', error);
-    const config = error.config;
-    // Transient network retry with backoff for safe fetch operations
-    if (
-      config &&
-      (!config._retryCount || config._retryCount < 2) &&
-      (!error.response || error.response.status >= 500 || error.response.status === 465 || error.code === 'ECONNABORTED' || error.message?.includes('Network Error')) &&
-      config.url &&
-      !config.url.includes('create') &&
-      !config.url.includes('delete') &&
-      !config.url.includes('update')
-    ) {
-      config._retryCount = (config._retryCount || 0) + 1;
-      await new Promise((resolve) => setTimeout(resolve, 800 * config._retryCount));
-      return apiClient(config);
+  (response) => response,
+  (error) => {
+    // Graceful error logging to assist debugging without unhandled crashes
+    const status = error?.response?.status;
+    const url = error?.config?.url;
+    if (status !== 404) {
+      console.log(`[API Network Error] ${url || 'request'} status=${status || 'timeout/network'}:`, error?.message);
     }
     return Promise.reject(error);
   }
@@ -114,6 +90,31 @@ export interface Farmer {
   updated_at: string;
   admin_id: string;
   code: string;
+  booth_name?: string;
+  total_amount?: number;
+  total_liters?: number;
+  total_procurements?: number;
+  today_amount?: number;
+  today_liters?: number;
+}
+
+export interface SubadminItem {
+  admin_id: string;
+  admin_name: string;
+  email?: string;
+  mobile_number?: string;
+  photo?: string;
+  address?: string;
+  status?: string;
+  created_at?: string;
+  role_id?: string;
+  total_amount?: number;
+  total_liters?: number;
+  total_procurements?: number;
+  today_amount?: number;
+  today_liters?: number;
+  otp?: string;
+  otp_expiry?: string;
 }
 
 export interface Animal {
@@ -186,13 +187,97 @@ export interface CreateProcurementPayload {
   }[];
 }
 
+export interface SendOtpResponse {
+  status: number | string;
+  message: string;
+  admin_id?: string;
+}
+
+export function normalizeSubadmin(item: SubadminItem): SubadminItem {
+  if (!item) return item;
+  return {
+    ...item,
+    photo: normalizeImageUrl(item.photo),
+  };
+}
+
+export function normalizeFarmer(item: Farmer): Farmer {
+  if (!item) return item;
+  return {
+    ...item,
+    profile: normalizeImageUrl(item.profile),
+  };
+}
+
+export function normalizeAnimal(item: Animal): Animal {
+  if (!item) return item;
+  return {
+    ...item,
+    vaccination_proof: normalizeImageUrl(item.vaccination_proof),
+  };
+}
+
 // ----------------------------------------------------
-// IN-MEMORY CACHE UTILITIES
+// IN-MEMORY CACHE & REQUEST DEDUPLICATION
 // ----------------------------------------------------
+const subadminsCache = { data: [] as SubadminItem[], timestamp: 0 };
+const subadminByIdCache = new Map<string, { data: SubadminItem; timestamp: number }>();
 const farmersCache = new Map<string, { data: Farmer[]; timestamp: number }>();
+const farmerByIdCache = new Map<string, { data: Farmer; timestamp: number }>();
 const animalsCache = new Map<string, { data: Animal[]; timestamp: number }>();
 const procurementCache = new Map<string, { data: FarmerProcurementResponse; timestamp: number }>();
-const CACHE_TTL_MS = 60 * 1000; // 1-minute TTL
+
+const CACHE_TTL_MS = 60 * 1000; // 1-minute TTL for fast navigation & low network usage
+
+// In-flight request deduplication map to prevent parallel duplicate calls
+const inFlightRequests = new Map<string, Promise<any>>();
+
+function dedupeRequest<T>(key: string, requestFn: () => Promise<T>): Promise<T> {
+  const existing = inFlightRequests.get(key);
+  if (existing) {
+    return existing as Promise<T>;
+  }
+  const promise = requestFn()
+    .finally(() => {
+      inFlightRequests.delete(key);
+    });
+  inFlightRequests.set(key, promise);
+  return promise;
+}
+
+// Concurrency helper for running promises with maximum parallel limit
+export async function batchAllSettled<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+  concurrency = 6
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let currentIndex = 0;
+
+  async function worker() {
+    while (currentIndex < items.length) {
+      const index = currentIndex++;
+      try {
+        const val = await fn(items[index]);
+        results[index] = { status: 'fulfilled', value: val };
+      } catch (err: any) {
+        results[index] = { status: 'rejected', reason: err };
+      }
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  const workers = Array.from({ length: workerCount }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+export function invalidateSubadminCache() {
+  subadminsCache.timestamp = 0;
+  subadminsCache.data = [];
+  subadminByIdCache.clear();
+  farmersCache.clear();
+}
 
 export function invalidateFarmerCache(admin_id?: string | number) {
   if (admin_id !== undefined && admin_id !== null) {
@@ -200,6 +285,7 @@ export function invalidateFarmerCache(admin_id?: string | number) {
   } else {
     farmersCache.clear();
   }
+  farmerByIdCache.clear();
   procurementCache.clear();
 }
 
@@ -211,8 +297,260 @@ export function invalidateAnimalCache(farmer_id?: string | number) {
   }
 }
 
+export function invalidateProcurementCache(farmer_id?: string | number) {
+  if (farmer_id !== undefined && farmer_id !== null) {
+    procurementCache.delete(String(farmer_id));
+  } else {
+    procurementCache.clear();
+  }
+}
+
 // ----------------------------------------------------
-// FARMER APIS
+// SUBADMIN APIS (Matches Postman "Subadmin" folder)
+// ----------------------------------------------------
+
+/**
+ * Get all subadmins
+ * Endpoint: GET /api/getallsubadmins
+ */
+export async function getAllSubadmins(forceRefresh = false): Promise<SubadminItem[]> {
+  const isFresh = Date.now() - subadminsCache.timestamp < CACHE_TTL_MS;
+  if (!forceRefresh && isFresh && subadminsCache.data.length > 0) {
+    return subadminsCache.data;
+  }
+
+  return dedupeRequest('getAllSubadmins', async () => {
+    try {
+      const res = await apiClient.get('/getallsubadmins');
+      const isOk =
+        res.data?.status === 200 ||
+        res.data?.status === '200' ||
+        res.data?.status === true;
+
+      if (isOk && Array.isArray(res.data?.data)) {
+        const list = res.data.data.map(normalizeSubadmin);
+        subadminsCache.data = list;
+        subadminsCache.timestamp = Date.now();
+        return list;
+      }
+      return [];
+    } catch {
+      return subadminsCache.data || [];
+    }
+  });
+}
+
+/**
+ * Get Subadmin by ID
+ * Endpoint: POST /api/subadminbyid
+ */
+export async function getSubadminById(
+  admin_id: string | number,
+  forceRefresh = false
+): Promise<SubadminItem | null> {
+  const cacheKey = String(admin_id);
+  if (!forceRefresh) {
+    const cached = subadminByIdCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return cached.data;
+    }
+  }
+
+  return dedupeRequest(`getSubadminById_${cacheKey}`, async () => {
+    try {
+      const res = await apiClient.post('/subadminbyid', {
+        admin_id: Number(admin_id),
+      });
+
+      const isOk =
+        res.data?.status === 200 ||
+        res.data?.status === '200' ||
+        res.data?.status === true;
+
+      if (isOk && res.data?.data) {
+        const raw = Array.isArray(res.data.data) ? res.data.data[0] : res.data.data;
+        const item: SubadminItem = normalizeSubadmin(raw);
+        subadminByIdCache.set(cacheKey, { data: item, timestamp: Date.now() });
+        return item;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+/**
+ * Subadmin Create
+ * Endpoint: POST /api/subadmincreate
+ * Formdata: admin_name, email, mobile_number, photo, address, password
+ */
+export async function createSubadmin(formData: FormData | Record<string, any>): Promise<any> {
+  try {
+    let payload: any = formData;
+    let headers: any = {
+      'Auth-Key': AUTH_KEY,
+      'User-Agent': DEFAULT_USER_AGENT,
+    };
+
+    if (!(formData instanceof FormData)) {
+      const fd = new FormData();
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined && formData[key] !== null) {
+          fd.append(key, formData[key]);
+        }
+      });
+      payload = fd;
+    }
+
+    const res = await axios.post(`${BASE_API_URL}/subadmincreate`, payload, {
+      headers,
+      transformRequest: (data: any) => data,
+      timeout: 30000,
+    });
+
+    invalidateSubadminCache();
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to create Sub-Admin.',
+    };
+  }
+}
+
+/**
+ * Subadmin Update
+ * Endpoint: POST /api/subadminupdate
+ * Formdata: admin_name, email, mobile_number, photo, address, password, admin_id
+ */
+export async function updateSubadmin(formData: FormData | Record<string, any>): Promise<any> {
+  try {
+    let payload: any = formData;
+    let headers: any = {
+      'Auth-Key': AUTH_KEY,
+      'User-Agent': DEFAULT_USER_AGENT,
+    };
+
+    if (!(formData instanceof FormData)) {
+      const fd = new FormData();
+      Object.keys(formData).forEach((key) => {
+        if (formData[key] !== undefined && formData[key] !== null) {
+          fd.append(key, formData[key]);
+        }
+      });
+      payload = fd;
+    }
+
+    const res = await axios.post(`${BASE_API_URL}/subadminupdate`, payload, {
+      headers,
+      transformRequest: (data: any) => data,
+      timeout: 30000,
+    });
+
+    invalidateSubadminCache();
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to update Sub-Admin.',
+    };
+  }
+}
+
+/**
+ * Subadmin Delete
+ * Endpoint: POST /api/subadmindelete
+ */
+export async function deleteSubadmin(admin_id: string | number): Promise<any> {
+  try {
+    const res = await apiClient.post('/subadmindelete', {
+      admin_id: Number(admin_id),
+    });
+    invalidateSubadminCache();
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to delete Sub-Admin.',
+    };
+  }
+}
+
+/**
+ * Change Password
+ * Endpoint: POST /api/changepassword
+ */
+export async function changePassword(
+  admin_id: string | number,
+  password: string,
+  newpassword: string
+): Promise<any> {
+  try {
+    const res = await apiClient.post('/changepassword', {
+      admin_id: Number(admin_id),
+      password,
+      newpassword,
+    });
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to change password.',
+    };
+  }
+}
+
+/**
+ * Send OTP
+ * Endpoint: POST /api/sendotp
+ */
+export async function sendOtp(email: string): Promise<SendOtpResponse> {
+  try {
+    const res = await apiClient.post('/sendotp', {
+      email: email.trim(),
+    });
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to send OTP.',
+    };
+  }
+}
+
+/**
+ * Reset Password Or Forgotpassword
+ * Endpoint: POST /api/resetpassword
+ */
+export async function resetPassword(
+  admin_id: string | number,
+  otp: string,
+  newpassword: string
+): Promise<any> {
+  try {
+    const res = await apiClient.post('/resetpassword', {
+      admin_id: Number(admin_id),
+      otp: otp.trim(),
+      newpassword: newpassword.trim(),
+    });
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to reset password.',
+    };
+  }
+}
+
+// ----------------------------------------------------
+// FARMER APIS (Matches Postman "Farmers" folder)
 // ----------------------------------------------------
 
 /**
@@ -232,122 +570,223 @@ export async function getFarmersByAdmin(
     }
   }
 
-  try {
-    const res = await apiClient.post('/getfarmersbyadmin', {
-      admin_id: Number(admin_id),
-    });
+  return dedupeRequest(`getFarmersByAdmin_${cacheKey}`, async () => {
+    try {
+      const res = await apiClient.post('/getfarmersbyadmin', {
+        admin_id: Number(admin_id),
+      });
 
-    const isOk =
-      res.data?.status === 200 ||
-      res.data?.status === '200' ||
-      res.data?.status === true;
+      const isOk =
+        res.data?.status === 200 ||
+        res.data?.status === '200' ||
+        res.data?.status === true;
 
-    let list: Farmer[] = [];
-    if (isOk && Array.isArray(res.data?.data)) {
-      list = res.data.data;
-    } else if (Array.isArray(res.data)) {
-      list = res.data;
-    }
-
-    // Deduplicate by farmer_id
-    const seen = new Set<string>();
-    const uniqueList: Farmer[] = [];
-    for (const f of list) {
-      const fid = String(f.farmer_id);
-      if (!seen.has(fid)) {
-        seen.add(fid);
-        uniqueList.push(f);
+      let list: Farmer[] = [];
+      if (isOk && Array.isArray(res.data?.data)) {
+        list = res.data.data.map(normalizeFarmer);
+      } else if (Array.isArray(res.data)) {
+        list = res.data.map(normalizeFarmer);
       }
-    }
 
-    farmersCache.set(cacheKey, { data: uniqueList, timestamp: Date.now() });
-    return uniqueList;
-  } catch (error: any) {
-    if (error?.response?.status === 404) {
-      farmersCache.set(cacheKey, { data: [], timestamp: Date.now() });
-      return [];
+      // Deduplicate by farmer_id
+      const seen = new Set<string>();
+      const uniqueList: Farmer[] = [];
+      for (const f of list) {
+        const fid = String(f.farmer_id);
+        if (!seen.has(fid)) {
+          seen.add(fid);
+          uniqueList.push(f);
+        }
+      }
+
+      farmersCache.set(cacheKey, { data: uniqueList, timestamp: Date.now() });
+      return uniqueList;
+    } catch (error: any) {
+      if (error?.response?.status === 404) {
+        farmersCache.set(cacheKey, { data: [], timestamp: Date.now() });
+        return [];
+      }
+      const existing = farmersCache.get(cacheKey);
+      return existing?.data || [];
     }
-    throw error;
+  });
+}
+
+/**
+ * Get all farmers across all subadmins (Optimized Parallel Batch Fetch)
+ */
+export async function getAllFarmers(forceRefresh = false): Promise<Farmer[]> {
+  const cacheKey = '__ALL_FARMERS__';
+  if (!forceRefresh) {
+    const cached = farmersCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return cached.data;
+    }
   }
+
+  return dedupeRequest('getAllFarmers', async () => {
+    try {
+      const subadmins = await getAllSubadmins(forceRefresh);
+      if (!subadmins.length) return [];
+
+      const settled = await batchAllSettled(
+        subadmins,
+        async (s) => {
+          const fList = await getFarmersByAdmin(s.admin_id, forceRefresh);
+          return fList.map((f) => ({
+            ...f,
+            booth_name: f.booth_name || s.admin_name,
+          }));
+        },
+        6
+      );
+
+      const combined: Farmer[] = [];
+      for (const res of settled) {
+        if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+          combined.push(...res.value);
+        }
+      }
+
+      const seen = new Set<string>();
+      const uniqueList: Farmer[] = [];
+      for (const f of combined) {
+        const fid = String(f.farmer_id);
+        if (!seen.has(fid)) {
+          seen.add(fid);
+          uniqueList.push(f);
+        }
+      }
+
+      farmersCache.set(cacheKey, { data: uniqueList, timestamp: Date.now() });
+      return uniqueList;
+    } catch {
+      const existing = farmersCache.get(cacheKey);
+      return existing?.data || [];
+    }
+  });
 }
 
 /**
  * Get Farmer details by Farmer ID
  * Endpoint: POST /api/farmergetbyid
  */
-export async function getFarmerById(farmer_id: string | number): Promise<Farmer | null> {
-  const res = await apiClient.post('/farmergetbyid', {
-    farmer_id: Number(farmer_id),
-  });
+export async function getFarmerById(
+  farmer_id: string | number,
+  forceRefresh = false
+): Promise<Farmer | null> {
+  const cacheKey = String(farmer_id);
 
-  const isOk =
-    res.data?.status === 200 ||
-    res.data?.status === '200' ||
-    res.data?.status === true;
-
-  if (isOk && res.data?.data) {
-    return Array.isArray(res.data.data) ? res.data.data[0] : res.data.data;
+  if (!forceRefresh) {
+    const cached = farmerByIdCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return cached.data;
+    }
   }
-  return null;
+
+  return dedupeRequest(`getFarmerById_${cacheKey}`, async () => {
+    try {
+      const res = await apiClient.post('/farmergetbyid', {
+        farmer_id: Number(farmer_id),
+      });
+
+      const isOk =
+        res.data?.status === 200 ||
+        res.data?.status === '200' ||
+        res.data?.status === true;
+
+      if (isOk && res.data?.data) {
+        const raw = Array.isArray(res.data.data) ? res.data.data[0] : res.data.data;
+        const farmer: Farmer = normalizeFarmer(raw);
+        farmerByIdCache.set(cacheKey, { data: farmer, timestamp: Date.now() });
+        return farmer;
+      }
+      return null;
+    } catch {
+      const cached = farmerByIdCache.get(cacheKey);
+      return cached?.data || null;
+    }
+  });
 }
 
 /**
  * Create Farmer (formdata with photo)
  * Endpoint: POST /api/farmercreate
  */
-export async function createFarmer(formData: FormData): Promise<{ status: number; message: string; farmer_id?: string | number; data?: any }> {
-  logApiRequest(`${BASE_API_URL}/farmercreate`, 'POST', formData);
-  const res = await axios.post(`${BASE_API_URL}/farmercreate`, formData, {
-    headers: {
-      'Auth-Key': AUTH_KEY,
-      'User-Agent': DEFAULT_USER_AGENT,
-      Accept: 'application/json',
-    },
-    transformRequest: (data: any) => data,
-    timeout: 30000,
-  });
+export async function createFarmer(formData: FormData): Promise<{ status: number | string; message: string; farmer_id?: string | number; data?: any }> {
+  try {
+    const res = await axios.post(`${BASE_API_URL}/farmercreate`, formData, {
+      headers: {
+        'Auth-Key': AUTH_KEY,
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'application/json',
+      },
+      transformRequest: (data: any) => data,
+      timeout: 30000,
+    });
 
-  logApiResponse('/farmercreate', res.status, res.data);
-  invalidateFarmerCache();
-  return res.data;
+    invalidateFarmerCache();
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to create farmer.',
+    };
+  }
 }
 
 /**
  * Update Farmer (formdata)
  * Endpoint: POST /api/farmerupdate
  */
-export async function updateFarmer(formData: FormData): Promise<{ status: number; message: string; data?: any }> {
-  logApiRequest(`${BASE_API_URL}/farmerupdate`, 'POST', formData);
-  const res = await axios.post(`${BASE_API_URL}/farmerupdate`, formData, {
-    headers: {
-      'Auth-Key': AUTH_KEY,
-      'User-Agent': DEFAULT_USER_AGENT,
-      Accept: 'application/json',
-    },
-    transformRequest: (data: any) => data,
-    timeout: 30000,
-  });
+export async function updateFarmer(formData: FormData): Promise<{ status: number | string; message: string; data?: any }> {
+  try {
+    const res = await axios.post(`${BASE_API_URL}/farmerupdate`, formData, {
+      headers: {
+        'Auth-Key': AUTH_KEY,
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'application/json',
+      },
+      transformRequest: (data: any) => data,
+      timeout: 30000,
+    });
 
-  logApiResponse('/farmerupdate', res.status, res.data);
-  invalidateFarmerCache();
-  return res.data;
+    invalidateFarmerCache();
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to update farmer.',
+    };
+  }
 }
 
 /**
  * Delete Farmer by Farmer ID
  * Endpoint: POST /api/farmerdelete
  */
-export async function deleteFarmer(farmer_id: string | number): Promise<{ status: number; message: string }> {
-  const res = await apiClient.post('/farmerdelete', {
-    farmer_id: Number(farmer_id),
-  });
-  invalidateFarmerCache();
-  invalidateAnimalCache(farmer_id);
-  return res.data;
+export async function deleteFarmer(farmer_id: string | number): Promise<{ status: number | string; message: string }> {
+  try {
+    const res = await apiClient.post('/farmerdelete', {
+      farmer_id: Number(farmer_id),
+    });
+    invalidateFarmerCache();
+    invalidateAnimalCache(farmer_id);
+    invalidateProcurementCache(farmer_id);
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to delete farmer.',
+    };
+  }
 }
 
 // ----------------------------------------------------
-// ANIMAL APIS
+// ANIMAL APIS (Matches Postman "Animals" folder)
 // ----------------------------------------------------
 
 /**
@@ -367,27 +806,29 @@ export async function getAnimalsByFarmerId(
     }
   }
 
-  try {
-    const res = await apiClient.post('/farmeridbyanimals', {
-      farmer_id: Number(farmer_id),
-    });
+  return dedupeRequest(`getAnimals_${cacheKey}`, async () => {
+    try {
+      const res = await apiClient.post('/farmeridbyanimals', {
+        farmer_id: Number(farmer_id),
+      });
 
-    const isOk =
-      res.data?.status === 200 ||
-      res.data?.status === '200' ||
-      res.data?.status === true;
+      const isOk =
+        res.data?.status === 200 ||
+        res.data?.status === '200' ||
+        res.data?.status === true;
 
-    if (isOk && Array.isArray(res.data?.data)) {
-      animalsCache.set(cacheKey, { data: res.data.data, timestamp: Date.now() });
-      return res.data.data;
+      if (isOk && Array.isArray(res.data?.data)) {
+        const list = res.data.data.map(normalizeAnimal);
+        animalsCache.set(cacheKey, { data: list, timestamp: Date.now() });
+        return list;
+      }
+      animalsCache.set(cacheKey, { data: [], timestamp: Date.now() });
+      return [];
+    } catch {
+      animalsCache.set(cacheKey, { data: [], timestamp: Date.now() });
+      return [];
     }
-    animalsCache.set(cacheKey, { data: [], timestamp: Date.now() });
-    return [];
-  } catch (error: any) {
-    // 404 or empty response means no animals yet for this farmer
-    animalsCache.set(cacheKey, { data: [], timestamp: Date.now() });
-    return [];
-  }
+  });
 }
 
 /**
@@ -395,77 +836,102 @@ export async function getAnimalsByFarmerId(
  * Endpoint: POST /api/animalgetbyid
  */
 export async function getAnimalById(animal_id: string | number): Promise<Animal | null> {
-  const res = await apiClient.post('/animalgetbyid', {
-    animal_id: Number(animal_id),
-  });
+  try {
+    const res = await apiClient.post('/animalgetbyid', {
+      animal_id: Number(animal_id),
+    });
 
-  const isOk =
-    res.data?.status === 200 ||
-    res.data?.status === '200' ||
-    res.data?.status === true;
+    const isOk =
+      res.data?.status === 200 ||
+      res.data?.status === '200' ||
+      res.data?.status === true;
 
-  if (isOk && res.data?.data) {
-    return Array.isArray(res.data.data) ? res.data.data[0] : res.data.data;
+    if (isOk && res.data?.data) {
+      const raw = Array.isArray(res.data.data) ? res.data.data[0] : res.data.data;
+      return normalizeAnimal(raw);
+    }
+    return null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /**
  * Create Animal for a Farmer
  * Endpoint: POST /api/animalcreate
  */
-export async function createAnimal(formData: FormData): Promise<{ status: number; message: string; animal_id?: string | number }> {
-  logApiRequest(`${BASE_API_URL}/animalcreate`, 'POST', formData);
-  const res = await axios.post(`${BASE_API_URL}/animalcreate`, formData, {
-    headers: {
-      'Auth-Key': AUTH_KEY,
-      'User-Agent': DEFAULT_USER_AGENT,
-      Accept: 'application/json',
-    },
-    transformRequest: (data: any) => data,
-    timeout: 30000,
-  });
+export async function createAnimal(formData: FormData): Promise<{ status: number | string; message: string; animal_id?: string | number }> {
+  try {
+    const res = await axios.post(`${BASE_API_URL}/animalcreate`, formData, {
+      headers: {
+        'Auth-Key': AUTH_KEY,
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'application/json',
+      },
+      transformRequest: (data: any) => data,
+      timeout: 30000,
+    });
 
-  logApiResponse('/animalcreate', res.status, res.data);
-  animalsCache.clear();
-  return res.data;
+    animalsCache.clear();
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to create animal.',
+    };
+  }
 }
 
 /**
  * Update Animal by Animal ID
  * Endpoint: POST /api/animalupdate
  */
-export async function updateAnimal(formData: FormData): Promise<{ status: number; message: string }> {
-  logApiRequest(`${BASE_API_URL}/animalupdate`, 'POST', formData);
-  const res = await axios.post(`${BASE_API_URL}/animalupdate`, formData, {
-    headers: {
-      'Auth-Key': AUTH_KEY,
-      'User-Agent': DEFAULT_USER_AGENT,
-      Accept: 'application/json',
-    },
-    transformRequest: (data: any) => data,
-    timeout: 30000,
-  });
+export async function updateAnimal(formData: FormData): Promise<{ status: number | string; message: string }> {
+  try {
+    const res = await axios.post(`${BASE_API_URL}/animalupdate`, formData, {
+      headers: {
+        'Auth-Key': AUTH_KEY,
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'application/json',
+      },
+      transformRequest: (data: any) => data,
+      timeout: 30000,
+    });
 
-  logApiResponse('/animalupdate', res.status, res.data);
-  animalsCache.clear();
-  return res.data;
+    animalsCache.clear();
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to update animal.',
+    };
+  }
 }
 
 /**
  * Delete Animal by Animal ID
  * Endpoint: POST /api/animaldelete
  */
-export async function deleteAnimal(animal_id: string | number): Promise<{ status: number; message: string }> {
-  const res = await apiClient.post('/animaldelete', {
-    animal_id: Number(animal_id),
-  });
-  animalsCache.clear();
-  return res.data;
+export async function deleteAnimal(animal_id: string | number): Promise<{ status: number | string; message: string }> {
+  try {
+    const res = await apiClient.post('/animaldelete', {
+      animal_id: Number(animal_id),
+    });
+    animalsCache.clear();
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to delete animal.',
+    };
+  }
 }
 
 // ----------------------------------------------------
-// DAILY PROCUREMENT & BILLING APIS
+// DAILY PROCUREMENT & BILLING APIS (Matches Postman)
 // ----------------------------------------------------
 
 /**
@@ -474,9 +940,19 @@ export async function deleteAnimal(animal_id: string | number): Promise<{ status
  */
 export async function createDailyProcurement(
   payload: CreateProcurementPayload
-): Promise<{ status: number; message: string; count?: number }> {
-  const res = await apiClient.post('/createdailyprocurement', payload);
-  return res.data;
+): Promise<{ status: number | string; message: string; count?: number }> {
+  try {
+    const res = await apiClient.post('/createdailyprocurement', payload);
+    invalidateFarmerCache();
+    invalidateProcurementCache(payload.farmer_id);
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: 500,
+      message: err?.message || 'Failed to record daily procurement.',
+    };
+  }
 }
 
 /**
@@ -496,22 +972,39 @@ export async function getProcurementByFarmerId(
     }
   }
 
-  try {
-    const res = await apiClient.post('/procurementbyfarmerid', {
-      farmer_id: Number(farmer_id),
-    });
-    procurementCache.set(cacheKey, { data: res.data, timestamp: Date.now() });
-    return res.data;
-  } catch (error: any) {
-    if (error?.response?.data) {
-      return error.response.data;
+  return dedupeRequest(`getProcurement_${cacheKey}`, async () => {
+    try {
+      const res = await apiClient.post('/procurementbyfarmerid', {
+        farmer_id: Number(farmer_id),
+      });
+      const responseData = res.data || {};
+      const normalizedData: FarmerProcurementResponse = {
+        status: responseData.status ?? 200,
+        message: responseData.message || '',
+        farmer_details: responseData.farmer_details ? normalizeFarmer(responseData.farmer_details) : undefined,
+        procurement_data: Array.isArray(responseData.procurement_data)
+          ? responseData.procurement_data
+          : [],
+      };
+      procurementCache.set(cacheKey, { data: normalizedData, timestamp: Date.now() });
+      return normalizedData;
+    } catch (error: any) {
+      if (error?.response?.data) {
+        const errData = error.response.data;
+        return {
+          status: errData.status ?? 404,
+          message: errData.message || 'No procurement records found',
+          farmer_details: errData.farmer_details ? normalizeFarmer(errData.farmer_details) : undefined,
+          procurement_data: Array.isArray(errData.procurement_data) ? errData.procurement_data : [],
+        };
+      }
+      return {
+        status: 404,
+        message: error?.message || 'No procurement records found',
+        procurement_data: [],
+      };
     }
-    return {
-      status: 404,
-      message: error?.message || 'No procurement records found',
-      procurement_data: [],
-    };
-  }
+  });
 }
 
 /**
@@ -521,56 +1014,53 @@ export async function getProcurementByFarmerId(
 export async function getProcurementById(
   procurement_id: string | number
 ): Promise<SingleProcurementResponse> {
-  const res = await apiClient.post('/procurementbyid', {
-    procurement_id: Number(procurement_id),
-  });
-  return res.data;
+  try {
+    const res = await apiClient.post('/procurementbyid', {
+      procurement_id: Number(procurement_id),
+    });
+    if (res.data?.farmer_details) {
+      res.data.farmer_details = normalizeFarmer(res.data.farmer_details);
+    }
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) {
+      if (err.response.data?.farmer_details) {
+        err.response.data.farmer_details = normalizeFarmer(err.response.data.farmer_details);
+      }
+      return err.response.data;
+    }
+    return {
+      status: 404,
+      message: err?.message || 'Procurement not found.',
+      procurement_data: null as any,
+    };
+  }
 }
 
 // ----------------------------------------------------
 // SNF & RATE CALCULATION UTILITIES
 // ----------------------------------------------------
 
-/**
- * Standard SNF Calculation Formula based on Lactometer Reading (CLR) and Fat%:
- * SNF = (CLR / 4) + (0.21 * Fat) + 0.36
- */
 export function calculateSNFFromCLR(clr: number, fat: number): number {
   if (isNaN(clr) || isNaN(fat)) return 0;
   const snf = clr / 4 + 0.21 * fat + 0.36;
   return Number(snf.toFixed(2));
 }
 
-/**
- * Rate Calculation per liter based on Fat and SNF
- * Uses standard Two-Axis pricing chart matching Canaan Dairy API defaults:
- * e.g., Cow milk (Fat ~4.5, SNF ~8.5) -> ~₹35/L
- * e.g., Buffalo milk (Fat ~7.0, SNF ~9.0) -> ~₹45/L
- * Rate = (Fat * 4.0) + (SNF * 2.0)
- */
 export function calculateMilkRate(fat: number, snf: number, animalType?: string): number {
   if (isNaN(fat) || isNaN(snf) || fat <= 0 || snf <= 0) {
     return animalType?.toLowerCase().includes('buffalo') ? 45.0 : 35.0;
   }
-  // Two-axis formula
   const calculated = fat * 4.0 + snf * 2.0;
   return Number(calculated.toFixed(2));
 }
 
-/**
- * Calculate Total Milk
- * Total Milk = Morning Quantity + Evening Quantity
- */
 export function calculateTotalMilk(morningLiters: number, eveningLiters: number): number {
   const m = isNaN(morningLiters) ? 0 : morningLiters;
   const e = isNaN(eveningLiters) ? 0 : eveningLiters;
   return Number((m + e).toFixed(2));
 }
 
-/**
- * Calculate Total Milk Amount
- * Total Milk Amount = Total Quantity * Price Per Liter
- */
 export function calculateTotalAmount(liters: number, pricePerLiter: number): number {
   const l = isNaN(liters) ? 0 : liters;
   const p = isNaN(pricePerLiter) ? 0 : pricePerLiter;
@@ -599,31 +1089,32 @@ export interface LoginApiResponse {
   role_id?: string;
 }
 
-/**
- * Admins Login
- * Endpoint: POST /api/login
- * Headers: { "Auth-Key": "canandairyApi", "Content-Type": "application/json" }
- * Body: raw JSON { "email": "...", "password": "..." }
- * Supports both Super Admin and Sub-Admin logins.
- */
 export async function loginAdmin(
   emailOrPhone: string,
   password: string
 ): Promise<LoginApiResponse> {
-  const requestBody = JSON.stringify({
-    email: emailOrPhone.trim(),
-    password: password.trim(),
-  });
+  try {
+    const res = await apiClient.post('/login', {
+      email: emailOrPhone.trim(),
+      password: password.trim(),
+    });
 
-  const res = await axios.post(`${BASE_API_URL}/login`, requestBody, {
-    headers: {
-      'Auth-Key': AUTH_KEY,
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/plain, */*',
-    },
-    timeout: 20000,
-  });
+    if (res.data?.userdata) {
+      res.data.userdata = {
+        ...res.data.userdata,
+        photo: normalizeImageUrl(res.data.userdata.photo),
+      };
+    }
 
-  return res.data;
+    return res.data;
+  } catch (error: any) {
+    if (error?.response?.data) {
+      return error.response.data;
+    }
+    return {
+      status: 500,
+      message: error?.message || 'Login failed. Please check your network connection.',
+    };
+  }
 }
 

@@ -8,16 +8,16 @@ import {
   ScrollView,
   Image,
   ActivityIndicator,
-  SafeAreaView,
   Alert,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import axios from 'axios';
-import { invalidateFarmerCache } from '@/src/services/dairyApi';
+import { invalidateFarmerCache, getFarmerById, updateFarmer } from '@/src/services/dairyApi';
+import { FarmerOverviewSkeleton } from '@/components/Shimmer';
 
 interface Farmer {
   farmer_id: string;
@@ -39,12 +39,6 @@ interface FormErrors {
   aadhar_number?: string;
   address?: string;
 }
-
-const GET_FARMER_BY_ID_URL =
-  'http://macsof.in/milkmanagement/api/farmergetbyid';
-
-const UPDATE_FARMER_URL =
-  'http://macsof.in/milkmanagement/api/farmerupdate';
 
 export default function UpdateFarmer() {
   const params = useLocalSearchParams<{
@@ -104,55 +98,19 @@ export default function UpdateFarmer() {
       return;
     }
 
-    const safeFarmerId = Number(farmer_id);
-    const url = GET_FARMER_BY_ID_URL;
-    const method = 'POST';
-    const headers = {
-      'Auth-Key': 'canandairyApi',
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
-
-    console.log('=== FARMER GET BY ID REQUEST ===');
-    console.log('farmer_id:', safeFarmerId);
-    console.log('URL:', url);
-    console.log('Method:', method);
-    console.log('Headers:', JSON.stringify(headers));
-    console.log('================================');
-    console.log('Farmer Get By ID URL:', url);
-
     try {
       setError(false);
 
-      const response = await axios.post(
-        url,
-        {
-          farmer_id: safeFarmerId,
-        },
-        {
-          headers,
-          timeout: 20000,
-        }
-      );
+      const data = await getFarmerById(farmer_id);
 
-      console.log('Update Farmer Fetch Response:', response.data);
-
-      if (response.data?.status === 200 && response.data?.data) {
-        const data = Array.isArray(response.data.data)
-          ? response.data.data[0]
-          : response.data.data;
-
-        if (data) {
-          setFarmer(data);
-          setFarmerName(data.farmer_name || '');
-          setMobileNumber(data.mobile_number || '');
-          setAadharNumber(data.aadhar_number || '');
-          setAddress(data.address || '');
-          setExistingImage(data.profile?.trim() ? data.profile : null);
-          setError(false);
-        } else {
-          setError(true);
-        }
+      if (data) {
+        setFarmer(data as Farmer);
+        setFarmerName(data.farmer_name || '');
+        setMobileNumber(data.mobile_number || '');
+        setAadharNumber(data.aadhar_number || '');
+        setAddress(data.address || '');
+        setExistingImage(data.profile?.trim() ? data.profile : null);
+        setError(false);
       } else {
         setError(true);
       }
@@ -280,7 +238,7 @@ export default function UpdateFarmer() {
       }
 
       console.log('=== SUPER ADMIN FARMER UPDATE REQUEST ===');
-      console.log('URL:', UPDATE_FARMER_URL);
+      console.log('Endpoint: /api/farmerupdate');
       console.log('Method: POST');
       console.log('farmer_id:', farmer_id);
       console.log('farmer_name:', farmerName.trim());
@@ -289,27 +247,18 @@ export default function UpdateFarmer() {
       console.log('address:', address.trim());
       console.log('admin_id:', effectiveAdminId);
       console.log('has newImage:', Boolean(newImage && newImage.uri));
-      console.log('========================================');
+      const response = await updateFarmer(formData);
 
-      const response = await axios.post(UPDATE_FARMER_URL, formData, {
-        headers: {
-          'Auth-Key': 'canandairyApi',
-          Accept: 'application/json',
-        },
-        transformRequest: (data: any) => data,
-        timeout: 30000,
-      });
-
-      console.log('Super Admin Farmer Update Response:', response.data);
+      console.log('Super Admin Farmer Update Response:', response);
 
       const isSuccess =
-        response.data?.status === 200 ||
-        response.data?.status === '200' ||
-        response.data?.status === true;
+        response?.status === 200 ||
+        (response?.status as any) === '200' ||
+        (response?.status as any) === true;
 
       if (isSuccess) {
         invalidateFarmerCache();
-        Alert.alert('Success', response.data?.message || 'Farmer updated successfully.', [
+        Alert.alert('Success', response?.message || 'Farmer updated successfully.', [
           {
             text: 'OK',
             onPress: () => router.back(),
@@ -318,7 +267,7 @@ export default function UpdateFarmer() {
       } else {
         Alert.alert(
           'Error',
-          response.data?.message || 'Could not update farmer. Please try again.'
+          response?.message || 'Could not update farmer. Please try again.'
         );
       }
     } catch (error: any) {
@@ -352,15 +301,9 @@ export default function UpdateFarmer() {
           <View style={styles.headerContent}>
             <Text style={styles.headerTitle}>Update Farmer</Text>
 
-            <Text style={styles.headerSubtitle}>Farmer Registration</Text>
           </View>
         </View>
-
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4CAF50" />
-
-          <Text style={styles.loadingText}>Loading farmer details...</Text>
-        </View>
+        <FarmerOverviewSkeleton />
       </SafeAreaView>
     );
   }

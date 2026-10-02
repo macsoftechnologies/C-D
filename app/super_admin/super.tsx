@@ -5,15 +5,16 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  SafeAreaView,
   ActivityIndicator,
   RefreshControl,
   Image,
   useWindowDimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import axios from 'axios';
+import { getAllSubadmins, normalizeImageUrl } from '@/src/services/dairyApi';
+import { SubAdminCardSkeleton } from '@/components/Shimmer';
 
 interface SubAdmin {
   admin_id: string;
@@ -26,9 +27,6 @@ interface SubAdmin {
   status: string;
   created_at: string;
 }
-
-const GET_SUBADMINS_URL =
-  'http://macsof.in/milkmanagement/api/getallsubadmins';
 
 const formatDate = (raw: string) => {
   const date = new Date(raw.replace(' ', 'T'));
@@ -59,40 +57,25 @@ export default function SuperAdminDashboard() {
       : Math.min(360, width - horizontalPadding * 2);
 
 
-      const getProfileImageUrl = (photo?: string) => {
-  if (!photo) return null;
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
 
-  const cleanUrl = photo.trim();
+  const getProfileImageUrl = (photo?: string) => {
+    return normalizeImageUrl(photo) || null;
+  };
 
-  if (!cleanUrl) return null;
-  if (cleanUrl.startsWith('http://')) {
-    return cleanUrl.replace('http://', 'https://');
-  }
-
-  return cleanUrl;
-};
-
-  const fetchSubAdmins = useCallback(async () => {
+  const fetchSubAdmins = useCallback(async (force = false) => {
     try {
-      const response = await axios.get(GET_SUBADMINS_URL, {
-        headers: {
-          'Auth-Key': 'canandairyApi',
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.data.status === 200) {
-        setSubAdmins(response.data.data);
-      }
+      const data = await getAllSubadmins(force);
+      setSubAdmins((data || []) as SubAdmin[]);
     } catch (error) {
-      console.log(error);
+      console.log('Error fetching subadmins:', error);
     }
   }, []);
 
   useEffect(() => {
     setLoading(true);
 
-    fetchSubAdmins().finally(() => {
+    fetchSubAdmins(false).finally(() => {
       setLoading(false);
     });
   }, [fetchSubAdmins]);
@@ -100,7 +83,7 @@ export default function SuperAdminDashboard() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
 
-    await fetchSubAdmins();
+    await fetchSubAdmins(true);
 
     setRefreshing(false);
   }, [fetchSubAdmins]);
@@ -145,62 +128,52 @@ export default function SuperAdminDashboard() {
         ]}
       >
         {/* Profile Section */}
-      <View style={styles.profileSection}>
-  {getProfileImageUrl(item.photo) ? (
-    <Image
-      source={{
-        uri: getProfileImageUrl(item.photo)!,
-      }}
-      style={styles.avatar}
-      resizeMode="cover"
-      onLoad={() => {
-        console.log(
-          'Profile image loaded:',
-          getProfileImageUrl(item.photo)
-        );
-      }}
-      onError={(error) => {
-        console.log(
-          'Profile image failed:',
-          getProfileImageUrl(item.photo),
-          error.nativeEvent
-        );
-      }}
-    />
-  ) : (
-    <View style={styles.avatarFallback}>
-      <Ionicons
-        name="person"
-        size={48}
-        color="#777"
-      />
-    </View>
-  )}
+        <View style={styles.profileSection}>
+          {getProfileImageUrl(item.photo) && !failedImages[item.admin_id] ? (
+            <Image
+              source={{
+                uri: getProfileImageUrl(item.photo)!,
+              }}
+              style={styles.avatar}
+              resizeMode="cover"
+              onError={() => {
+                setFailedImages((prev) => ({ ...prev, [item.admin_id]: true }));
+              }}
+            />
+          ) : (
+            <View style={styles.avatarFallback}>
+              <Ionicons
+                name="person"
+                size={48}
+                color="#777"
+              />
+            </View>
+          )}
 
-  <View
-    style={[
-      styles.statusBadge,
-      isActive
-        ? styles.statusActive
-        : styles.statusInactive,
-    ]}
-  >
-    <View
-      style={[
-        styles.statusDot,
-        {
-          backgroundColor: isActive
-            ? '#4CAF50'
-            : '#F44336',
-        },
-      ]}
-    />
+          <View
+            style={[
+              styles.statusBadge,
+              isActive
+                ? styles.statusActive
+                : styles.statusInactive,
+            ]}
+          >
+            <View
+              style={[
+                styles.statusDot,
+                {
+                  backgroundColor: isActive
+                    ? '#4CAF50'
+                    : '#F44336',
+                },
+              ]}
+            />
 
-    <Text style={styles.statusText}>
-      {isActive ? 'Active' : 'Inactive'}
-    </Text>
-  </View>
-</View>
+            <Text style={styles.statusText}>
+              {isActive ? 'Active' : 'Inactive'}
+            </Text>
+          </View>
+        </View>
 
         {/* Admin Name */}
         <Text
@@ -308,7 +281,7 @@ export default function SuperAdminDashboard() {
           <TouchableOpacity
             style={styles.updateButton}
             activeOpacity={0.8}
-            onPress={() =>   router.push({
+            onPress={() => router.push({
               pathname: '/super_admin/myfarmers',
               params: {
                 admin_id: item.admin_id,
@@ -392,11 +365,7 @@ export default function SuperAdminDashboard() {
 
       {/* List */}
       {loading && subAdmins.length === 0 ? (
-        <ActivityIndicator
-          style={{ marginTop: 40 }}
-          color="#4CAF50"
-          size="large"
-        />
+        <SubAdminCardSkeleton count={3} />
       ) : (
         <FlatList
           data={subAdmins}
@@ -688,7 +657,7 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 9,
     backgroundColor: '#4CAF50',
-     color : '#fff',
+    color: '#fff',
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',

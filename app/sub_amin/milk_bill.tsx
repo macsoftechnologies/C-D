@@ -4,13 +4,13 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   ActivityIndicator,
   Alert,
   Share,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
@@ -19,6 +19,7 @@ import {
   Farmer,
   ProcurementRecordItem,
 } from '@/src/services/dairyApi';
+import { BillSkeleton } from '@/components/Shimmer';
 
 const COLORS = {
   bg: '#F5F7F4',
@@ -214,10 +215,7 @@ Status: Verified by Canaan Dairy`;
           <Text style={styles.headerTitle}>Milk Bill</Text>
           <View style={{ width: 22 }} />
         </View>
-        <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color={COLORS.brandGreen} />
-          <Text style={styles.loadingText}>Generating Milk Bill from backend...</Text>
-        </View>
+        <BillSkeleton />
       </SafeAreaView>
     );
   }

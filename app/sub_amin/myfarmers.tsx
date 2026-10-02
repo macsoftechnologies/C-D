@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -13,12 +13,20 @@ import {
   TextInput,
   Linking,
   Alert,
+  ScrollView,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getFarmersByAdmin, Farmer } from '@/src/services/dairyApi';
+import {
+  getFarmersByAdmin,
+  getAllFarmers,
+  getAllSubadmins,
+  Farmer,
+  SubadminItem,
+} from '@/src/services/dairyApi';
 import { getUserSession } from '@/src/authStorage';
+import { FarmerCardSkeleton } from '@/components/Shimmer';
 
 const formatDate = (raw?: string) => {
   if (!raw) return '-';
@@ -38,11 +46,14 @@ export default function SubAdminMyFarmers() {
 
   const [adminId, setAdminId] = useState<string>(params.admin_id || '');
   const [farmers, setFarmers] = useState<Farmer[]>([]);
+  const [subadmins, setSubadmins] = useState<SubadminItem[]>([]);
+  const [selectedBoothId, setSelectedBoothId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [failedFarmerImages, setFailedFarmerImages] = useState<Record<string, boolean>>({});
 
   // Resolve adminId on mount if not in params
   useEffect(() => {
@@ -63,20 +74,38 @@ export default function SubAdminMyFarmers() {
 
   const fetchFarmers = useCallback(
     async (forceRefresh = false) => {
-      if (!adminId) return;
-
       try {
         setError(false);
         setErrorMessage('');
-        const data = await getFarmersByAdmin(adminId, forceRefresh);
-        setFarmers(data);
+
+        // Fetch complete farmer list across all booths/subadmins exactly matching Super Admin
+        const [farmerData, boothList] = await Promise.all([
+          getAllFarmers(forceRefresh),
+          getAllSubadmins(forceRefresh),
+        ]);
+
+        setFarmers(farmerData);
+        setSubadmins(boothList);
       } catch (err: any) {
         console.log('Error fetching sub-admin farmers:', err);
-        setError(true);
-        setErrorMessage(
-          err?.response?.data?.message ||
-            'Unable to retrieve farmers. Please check your network.'
-        );
+        if (adminId) {
+          try {
+            const fallback = await getFarmersByAdmin(adminId, forceRefresh);
+            setFarmers(fallback);
+          } catch {
+            setError(true);
+            setErrorMessage(
+              err?.response?.data?.message ||
+                'Unable to retrieve farmers. Please check your network.'
+            );
+          }
+        } else {
+          setError(true);
+          setErrorMessage(
+            err?.response?.data?.message ||
+              'Unable to retrieve farmers. Please check your network.'
+          );
+        }
       } finally {
         setLoading(false);
       }
@@ -86,10 +115,8 @@ export default function SubAdminMyFarmers() {
 
   useFocusEffect(
     useCallback(() => {
-      if (adminId) {
-        fetchFarmers(false);
-      }
-    }, [adminId, fetchFarmers])
+      fetchFarmers(false);
+    }, [fetchFarmers])
   );
 
   const onRefresh = async () => {
@@ -125,6 +152,31 @@ export default function SubAdminMyFarmers() {
     });
   };
 
+  const handleRecordMilk = (item: Farmer) => {
+    if (!item.farmer_id) return;
+    console.log('[SUB ADMIN] Navigating to Record Daily Procurement for Farmer:', {
+      farmer_id: item.farmer_id,
+      farmer_name: item.farmer_name,
+      admin_id: item.admin_id || adminId,
+    });
+    router.push({
+      pathname: '/sub_amin/daily_procurement' as any,
+      params: {
+        farmer_id: String(item.farmer_id),
+        admin_id: String(item.admin_id || adminId || ''),
+        farmer_name: item.farmer_name || '',
+        code: item.code || '',
+        mobile_number: item.mobile_number || '',
+        aadhar_number: item.aadhar_number || '',
+        address: item.address || '',
+        status: String(item.status ?? '1'),
+        profile: item.profile || '',
+        created_at: item.created_at || '',
+        open_record: 'true',
+      },
+    });
+  };
+
   const handleAddFarmer = () => {
     router.push({
       pathname: '/sub_amin/create_farmer',
@@ -132,16 +184,31 @@ export default function SubAdminMyFarmers() {
     });
   };
 
-  const filteredFarmers = farmers.filter((f) => {
+  const filteredFarmers = useMemo(() => {
+    let list = farmers;
+    if (selectedBoothId !== 'all') {
+      list = list.filter((f) => String(f.admin_id) === String(selectedBoothId));
+    }
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      f.farmer_name?.toLowerCase().includes(q) ||
-      f.code?.toLowerCase().includes(q) ||
-      f.mobile_number?.includes(q) ||
-      f.address?.toLowerCase().includes(q)
+    if (!q) return list;
+    return list.filter(
+      (f) =>
+        f.farmer_name?.toLowerCase().includes(q) ||
+        f.code?.toLowerCase().includes(q) ||
+        f.mobile_number?.includes(q) ||
+        f.address?.toLowerCase().includes(q) ||
+        f.booth_name?.toLowerCase().includes(q)
     );
-  });
+  }, [farmers, selectedBoothId, searchQuery]);
+
+  const boothCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    farmers.forEach((f) => {
+      const id = String(f.admin_id || '');
+      if (id) counts[id] = (counts[id] || 0) + 1;
+    });
+    return counts;
+  }, [farmers]);
 
   const renderHeader = () => (
     <View style={styles.header}>
@@ -189,11 +256,14 @@ export default function SubAdminMyFarmers() {
       >
         {/* Profile Section */}
         <View style={styles.profileSection}>
-          {item.profile?.trim() ? (
+          {item.profile?.trim() && !failedFarmerImages[item.farmer_id] ? (
             <Image
               source={{ uri: item.profile }}
               style={styles.avatar}
               resizeMode="cover"
+              onError={() => {
+                setFailedFarmerImages((prev) => ({ ...prev, [item.farmer_id]: true }));
+              }}
             />
           ) : (
             <View style={styles.avatarFallback}>
@@ -201,21 +271,32 @@ export default function SubAdminMyFarmers() {
             </View>
           )}
 
-          <View
-            style={[
-              styles.statusBadge,
-              isActive ? styles.statusActive : styles.statusInactive,
-            ]}
-          >
+          <View style={styles.badgeColumn}>
             <View
               style={[
-                styles.statusDot,
-                { backgroundColor: isActive ? '#4CAF50' : '#F44336' },
+                styles.statusBadge,
+                isActive ? styles.statusActive : styles.statusInactive,
               ]}
-            />
-            <Text style={styles.statusText}>
-              {isActive ? 'Active' : 'Inactive'}
-            </Text>
+            >
+              <View
+                style={[
+                  styles.statusDot,
+                  { backgroundColor: isActive ? '#4CAF50' : '#F44336' },
+                ]}
+              />
+              <Text style={styles.statusText}>
+                {isActive ? 'Active' : 'Inactive'}
+              </Text>
+            </View>
+
+            {item.booth_name ? (
+              <View style={styles.boothBadge}>
+                <Ionicons name="business-outline" size={11} color="#1F5E4A" />
+                <Text style={styles.boothBadgeText} numberOfLines={1}>
+                  {item.booth_name}
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -270,6 +351,18 @@ export default function SubAdminMyFarmers() {
             </View>
           </View>
 
+          {item.booth_name ? (
+            <View style={styles.rowLine}>
+              <View style={styles.iconBox}>
+                <Ionicons name="business-outline" size={16} color="#4CAF50" />
+              </View>
+              <View style={styles.rowContent}>
+                <Text style={styles.rowLabel}>Booth / Center</Text>
+                <Text style={styles.rowText}>{item.booth_name}</Text>
+              </View>
+            </View>
+          ) : null}
+
           <View style={styles.rowLine}>
             <View style={styles.iconBox}>
               <Ionicons name="calendar-outline" size={16} color="#999999" />
@@ -281,15 +374,26 @@ export default function SubAdminMyFarmers() {
           </View>
         </View>
 
-        {/* View More Button */}
-        <TouchableOpacity
-          style={styles.viewMoreButton}
-          activeOpacity={0.85}
-          onPress={() => handleView(item)}
-        >
-          <Text style={styles.viewMoreText}>View More</Text>
-          <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-        </TouchableOpacity>
+        {/* Actions Row: Record Milk & View More */}
+        <View style={styles.actionsRow}>
+          <TouchableOpacity
+            style={styles.recordMilkButton}
+            activeOpacity={0.85}
+            onPress={() => handleRecordMilk(item)}
+          >
+            <MaterialCommunityIcons name="water-plus" size={18} color="#FFFFFF" />
+            <Text style={styles.recordMilkText}>Record Milk</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.viewMoreButton}
+            activeOpacity={0.85}
+            onPress={() => handleView(item)}
+          >
+            <Text style={styles.viewMoreText}>View More</Text>
+            <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -304,7 +408,7 @@ export default function SubAdminMyFarmers() {
         <Ionicons name="search" size={18} color="#888" />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search by name, code, phone..."
+          placeholder="Search by name, code, phone, booth..."
           placeholderTextColor="#888"
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -316,12 +420,64 @@ export default function SubAdminMyFarmers() {
         ) : null}
       </View>
 
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4CAF50" />
-          <Text style={styles.loadingText}>Loading farmers...</Text>
+      {/* Booth Filters (Horizontal Scroll) */}
+      {!loading && subadmins.length > 0 && (
+        <View style={styles.boothFilterWrapper}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.boothFilterContent}
+          >
+            <TouchableOpacity
+              style={[
+                styles.boothChip,
+                selectedBoothId === 'all' && styles.boothChipActive,
+              ]}
+              onPress={() => setSelectedBoothId('all')}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[
+                  styles.boothChipText,
+                  selectedBoothId === 'all' && styles.boothChipTextActive,
+                ]}
+              >
+                All Booths ({farmers.length})
+              </Text>
+            </TouchableOpacity>
+
+            {subadmins.map((sub) => {
+              const count = boothCounts[String(sub.admin_id)] || 0;
+              const isSelected = String(selectedBoothId) === String(sub.admin_id);
+              const label = sub.admin_name || `Booth #${sub.admin_id}`;
+              return (
+                <TouchableOpacity
+                  key={String(sub.admin_id)}
+                  style={[
+                    styles.boothChip,
+                    isSelected && styles.boothChipActive,
+                  ]}
+                  onPress={() => setSelectedBoothId(String(sub.admin_id))}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.boothChipText,
+                      isSelected && styles.boothChipTextActive,
+                    ]}
+                  >
+                    {label} ({count})
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
-      ) : error ? (
+      )}
+
+      {loading && farmers.length === 0 ? (
+        <FarmerCardSkeleton count={5} />
+      ) : error && farmers.length === 0 ? (
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle-outline" size={42} color="#F44336" />
           <Text style={styles.errorTitle}>Failed to load farmers</Text>
@@ -578,18 +734,50 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 4,
+  },
+  recordMilkButton: {
+    flex: 1,
+    backgroundColor: '#1F5E4A',
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 6,
+    shadowColor: '#1F5E4A',
+    shadowOpacity: 0.22,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
+  recordMilkText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
   viewMoreButton: {
+    flex: 1,
     backgroundColor: '#4CAF50',
     borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
-    gap: 8,
+    gap: 6,
+    shadowColor: '#4CAF50',
+    shadowOpacity: 0.18,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
   },
   viewMoreText: {
     color: '#FFFFFF',
-    fontSize: 14.5,
+    fontSize: 13.5,
     fontWeight: '700',
   },
   loadingContainer: {
@@ -659,6 +847,54 @@ const styles = StyleSheet.create({
   emptyAddBtnText: {
     color: '#FFF',
     fontSize: 13.5,
+    fontWeight: '700',
+  },
+  badgeColumn: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  boothBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    gap: 4,
+    maxWidth: 160,
+  },
+  boothBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1F5E4A',
+  },
+  boothFilterWrapper: {
+    paddingVertical: 6,
+    marginBottom: 4,
+  },
+  boothFilterContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  boothChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  boothChipActive: {
+    backgroundColor: '#1F5E4A',
+    borderColor: '#1F5E4A',
+  },
+  boothChipText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#666666',
+  },
+  boothChipTextActive: {
+    color: '#FFFFFF',
     fontWeight: '700',
   },
 });

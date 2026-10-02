@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  SafeAreaView,
   Image,
   Alert,
   StatusBar,
@@ -16,10 +15,10 @@ import {
   TextInput,
   KeyboardAvoidingView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import axios from 'axios';
 import {
   getFarmerById,
   getAnimalsByFarmerId,
@@ -34,6 +33,7 @@ import {
   calculateTotalAmount,
   DailyProcurementDateGroup,
 } from '@/src/services/dairyApi';
+import { FarmerOverviewSkeleton, ShimmerBlock } from '@/components/Shimmer';
 
 // ----------------------------------------------------
 // TYPES
@@ -69,31 +69,6 @@ export interface AnimalItem {
   milk_capacity?: string;
   milk_details?: string;
 }
-
-// ----------------------------------------------------
-// API ENDPOINTS (Postman Collection)
-// ----------------------------------------------------
-
-const GET_FARMER_BY_ID_URL =
-  'http://macsof.in/milkmanagement/api/farmergetbyid';
-
-const DELETE_FARMER_URL =
-  'http://macsof.in/milkmanagement/api/farmerdelete';
-
-const GET_ANIMALS_BY_FARMER_URL =
-  'http://macsof.in/milkmanagement/api/farmeridbyanimals';
-
-const ANIMAL_CREATE_URL =
-  'http://macsof.in/milkmanagement/api/animalcreate';
-
-const ANIMAL_UPDATE_URL =
-  'http://macsof.in/milkmanagement/api/animalupdate';
-
-const ANIMAL_DELETE_URL =
-  'http://macsof.in/milkmanagement/api/animaldelete';
-
-const ANIMAL_GET_BY_ID_URL =
-  'http://macsof.in/milkmanagement/api/animalgetbyid';
 
 // ----------------------------------------------------
 // THEME COLORS
@@ -183,6 +158,7 @@ export default function SubAdminFarmerOverview() {
   const [animalsLoading, setAnimalsLoading] = useState(false);
   const [animalsError, setAnimalsError] = useState(false);
   const [animalsErrorMessage, setAnimalsErrorMessage] = useState('');
+  const [avatarError, setAvatarError] = useState(false);
 
   // Modals State
   const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
@@ -565,8 +541,6 @@ export default function SubAdminFarmerOverview() {
     }
 
     setSavingAnimal(true);
-    const url = ANIMAL_CREATE_URL;
-    const method = 'POST';
 
     try {
       const formData = new FormData();
@@ -603,8 +577,7 @@ export default function SubAdminFarmerOverview() {
       }
     } catch (err: any) {
       console.log('========== ANIMAL API ERROR ==========');
-      console.log('URL:', url);
-      console.log('METHOD:', method);
+      console.log('Endpoint: /api/animalcreate (POST)');
       console.log('FARMER ID:', farmer_id);
       console.log('PARAMS: none');
       console.log('REQUEST BODY: animal_type =', finalType);
@@ -650,8 +623,6 @@ export default function SubAdminFarmerOverview() {
     }
 
     setUpdatingAnimal(true);
-    const url = ANIMAL_UPDATE_URL;
-    const method = 'POST';
 
     try {
       const formData = new FormData();
@@ -688,8 +659,7 @@ export default function SubAdminFarmerOverview() {
       }
     } catch (err: any) {
       console.log('========== ANIMAL API ERROR ==========');
-      console.log('URL:', url);
-      console.log('METHOD:', method);
+      console.log('Endpoint: /api/animalupdate (POST)');
       console.log('FARMER ID:', farmer_id);
       console.log('PARAMS: animal_id =', editingAnimal.animal_id);
       console.log('REQUEST BODY: animal_type =', finalType);
@@ -746,7 +716,7 @@ export default function SubAdminFarmerOverview() {
   // RENDER: LOADING & ERROR STATES
   // ----------------------------------------------------
 
-  if (loading) {
+  if (loading && !farmer) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor={COLORS.statusBarBg} />
@@ -760,10 +730,7 @@ export default function SubAdminFarmerOverview() {
           </View>
         </View>
 
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={COLORS.brandGreen} />
-          <Text style={styles.loadingText}>Loading farmer details...</Text>
-        </View>
+        <FarmerOverviewSkeleton />
       </SafeAreaView>
     );
   }
@@ -835,11 +802,12 @@ export default function SubAdminFarmerOverview() {
         {/* Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatarWrapper}>
-            {farmer.profile?.trim() ? (
+            {farmer.profile?.trim() && !avatarError ? (
               <Image
                 source={{ uri: farmer.profile }}
                 style={styles.avatar}
                 resizeMode="cover"
+                onError={() => setAvatarError(true)}
               />
             ) : (
               <View style={styles.avatarFallback}>
@@ -967,10 +935,10 @@ export default function SubAdminFarmerOverview() {
           </View>
 
           {/* Animals Loading State */}
-          {animalsLoading ? (
-            <View style={styles.animalsLoaderWrap}>
-              <ActivityIndicator size="small" color={COLORS.brandGreen} />
-              <Text style={styles.animalsLoaderText}>Loading farmer's animals...</Text>
+          {animalsLoading && animals.length === 0 ? (
+            <View style={{ paddingVertical: 10 }}>
+              <ShimmerBlock width="100%" height={68} borderRadius={12} />
+              <ShimmerBlock width="100%" height={68} borderRadius={12} style={{ marginTop: 8 }} />
             </View>
           ) : animalsError ? (
             /* Animals API Error State */
@@ -1177,10 +1145,11 @@ export default function SubAdminFarmerOverview() {
           </View>
 
           {/* Loading */}
-          {procurementsLoading ? (
-            <View style={styles.animalsLoaderWrap}>
-              <ActivityIndicator size="small" color={COLORS.brandGreen} />
-              <Text style={styles.animalsLoaderText}>Loading milk procurement records...</Text>
+          {procurementsLoading && procurements.length === 0 ? (
+            <View style={{ paddingVertical: 10 }}>
+              <ShimmerBlock width="100%" height={44} borderRadius={8} />
+              <ShimmerBlock width="100%" height={44} borderRadius={8} style={{ marginTop: 8 }} />
+              <ShimmerBlock width="100%" height={44} borderRadius={8} style={{ marginTop: 8 }} />
             </View>
           ) : procurements.length === 0 ? (
             <View style={styles.emptyAnimalsBox}>

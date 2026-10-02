@@ -6,20 +6,18 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  SafeAreaView,
   ScrollView,
   Image,
   Alert,
   useWindowDimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import axios from 'axios';
 import { router, useLocalSearchParams } from 'expo-router';
+import { getSubadminById, deleteSubadmin, SubadminItem } from '@/src/services/dairyApi';
+import { AdminOverviewSkeleton } from '@/components/Shimmer';
 
-const SUB_ADMIN_URL =
-  'http://macsof.in/milkmanagement/api/subadminbyid';
-
-interface AdminDetails {
+interface AdminDetails extends SubadminItem {
   admin_id: string;
   admin_name: string;
   mobile_number: string;
@@ -59,8 +57,9 @@ export default function AdminOverview() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
-  const fetchAdminDetails = async () => {
+  const fetchAdminDetails = async (force = false) => {
     if (!admin_id) {
       setLoading(false);
       setError(true);
@@ -71,38 +70,10 @@ export default function AdminOverview() {
       setLoading(true);
       setError(false);
 
-      const response = await axios.post(
-        SUB_ADMIN_URL,
-        {
-          admin_id: admin_id,
-        },
-        {
-          headers: {
-            'Auth-Key': 'canandairyApi',
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const data = await getSubadminById(admin_id, force);
 
-      console.log('Sub Admin Response:', response.data);
-
-      if (
-        response.data?.status === 200 &&
-        response.data?.data
-      ) {
-        /*
-         * If API returns a single object:
-         * data: {...}
-         *
-         * If your API returns:
-         * data: [{...}]
-         * this also handles it.
-         */
-        const data = Array.isArray(response.data.data)
-          ? response.data.data[0]
-          : response.data.data;
-
-        setAdminDetails(data);
+      if (data) {
+        setAdminDetails(data as AdminDetails);
       } else {
         setError(true);
       }
@@ -118,6 +89,8 @@ export default function AdminOverview() {
     fetchAdminDetails();
   }, [admin_id]);
 
+  const [deleting, setDeleting] = useState(false);
+
   const handleBack = () => {
     router.back();
   };
@@ -131,19 +104,53 @@ export default function AdminOverview() {
     });
   };
 
+  const confirmDeleteSubadmin = () => {
+    Alert.alert(
+      'Delete Sub Admin',
+      `Are you sure you want to delete "${adminDetails?.admin_name || 'this sub admin'}"?\n\nThis action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (!admin_id) return;
+            setDeleting(true);
+            try {
+              const res = await deleteSubadmin(admin_id);
+              const isOk =
+                res?.status === 200 ||
+                (res?.status as any) === '200' ||
+                (res?.status as any) === true;
+              if (isOk) {
+                Alert.alert('Deleted', res?.message || 'Sub Admin deleted successfully.', [
+                  { text: 'OK', onPress: () => router.replace('/super_admin/super') },
+                ]);
+              } else {
+                Alert.alert('Delete Failed', res?.message || 'Could not delete sub admin.');
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Failed to delete sub admin.');
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator
-            size="large"
-            color="#4CAF50"
-          />
-
-          <Text style={styles.loadingText}>
-            Loading admin details...
-          </Text>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#161616" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Admin Details</Text>
+          <View style={{ width: 40 }} />
         </View>
+        <AdminOverviewSkeleton />
       </SafeAreaView>
     );
   }
@@ -170,7 +177,7 @@ export default function AdminOverview() {
 
           <TouchableOpacity
             style={styles.retryButton}
-            onPress={fetchAdminDetails}
+            onPress={() => fetchAdminDetails(true)}
           >
             <Ionicons
               name="refresh-outline"
@@ -249,13 +256,14 @@ export default function AdminOverview() {
         {/* Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.profileImageContainer}>
-            {adminDetails.photo ? (
+            {adminDetails.photo && !imageError ? (
               <Image
                 source={{
                   uri: adminDetails.photo,
                 }}
                 style={styles.profileImage}
                 resizeMode="cover"
+                onError={() => setImageError(true)}
               />
             ) : (
               <View style={styles.profileFallback}>
@@ -479,6 +487,33 @@ export default function AdminOverview() {
           </View>
         </View>
 
+        {/* Collection & Procurement Statistics Card */}
+        <View style={styles.detailsCard}>
+          <Text style={styles.sectionTitle}>Procurement & Milk Collection</Text>
+
+          <View style={styles.statsGrid}>
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>Total Collections</Text>
+              <Text style={styles.statValue}>{adminDetails.total_procurements ?? 0}</Text>
+            </View>
+
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>Total Milk</Text>
+              <Text style={styles.statValue}>{adminDetails.total_liters !== undefined ? `${Number(adminDetails.total_liters).toFixed(1)} L` : '0 L'}</Text>
+            </View>
+
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>Total Paid</Text>
+              <Text style={[styles.statValue, { color: '#2E7D32' }]}>₹{adminDetails.total_amount !== undefined ? Number(adminDetails.total_amount).toFixed(2) : '0.00'}</Text>
+            </View>
+
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>Today's Milk</Text>
+              <Text style={styles.statValue}>{adminDetails.today_liters !== undefined ? `${Number(adminDetails.today_liters).toFixed(1)} L` : '0 L'}</Text>
+            </View>
+          </View>
+        </View>
+
         {/* Update Button */}
         <TouchableOpacity
           style={styles.updateButton}
@@ -518,6 +553,29 @@ export default function AdminOverview() {
           <Text style={styles.updateButtonText}>
             View Farmers
           </Text>
+        </TouchableOpacity>
+
+        {/* Delete Sub Admin Button */}
+        <TouchableOpacity
+          style={[styles.updateButton, { backgroundColor: '#C62828', marginTop: 12 }]}
+          onPress={confirmDeleteSubadmin}
+          disabled={deleting}
+          activeOpacity={0.85}
+        >
+          {deleting ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <>
+              <Ionicons
+                name="trash-outline"
+                size={20}
+                color="#fff"
+              />
+              <Text style={styles.updateButtonText}>
+                Delete Sub Admin
+              </Text>
+            </>
+          )}
         </TouchableOpacity>
 
         {/* Bottom spacing */}
@@ -834,5 +892,31 @@ const styles = StyleSheet.create({
     color: '#555',
     fontSize: 13,
     fontWeight: '600',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 8,
+  },
+  statBox: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: '#F7F9F6',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E8EBE6',
+  },
+  statLabel: {
+    fontSize: 11.5,
+    color: '#6B6B60',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#161616',
   },
 });

@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View,
   Text,
+  
   StyleSheet,
   TouchableOpacity,
   FlatList,
   Modal,
   TextInput,
-  SafeAreaView,
   ScrollView,
   ActivityIndicator,
   RefreshControl,
@@ -19,13 +18,16 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import axios from 'axios';
+import { View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 import {
   getUserSession,
   clearUserSession,
   StoredUserData,
 } from '@/src/authStorage';
-import { getFarmersByAdmin, getAnimalsByFarmerId } from '@/src/services/dairyApi';
+import { getFarmersByAdmin, getAnimalsByFarmerId, batchAllSettled } from '@/src/services/dairyApi';
+import { FarmerCardSkeleton } from '@/components/Shimmer';
 
 const COLORS = {
   bg: '#F5F7F4',
@@ -166,25 +168,31 @@ export default function SubAdminDashboard() {
     }
   }, []);
 
-  // 3. Lazy background loader for animals (non-blocking)
+  // 3. Lazy background loader for animals (non-blocking with batching)
   const fetchAnimalsLazily = useCallback(async (farmerList: Farmer[], force = false) => {
     if (!farmerList.length) return;
     try {
       setAnimalsLoading(true);
-      const animalPromises = farmerList.map(async (f) => {
-        try {
+      const settled = await batchAllSettled(
+        farmerList,
+        async (f) => {
           const res = await getAnimalsByFarmerId(f.farmer_id, force);
           return res.map((a) => ({
             ...a,
             farmer_name: f.farmer_name || 'Farmer',
             farmer_code: f.code || `F-${f.farmer_id}`,
           }));
-        } catch {
-          return [];
+        },
+        6
+      );
+
+      const allAnimals: DashboardAnimal[] = [];
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+          allAnimals.push(...r.value);
         }
-      });
-      const results = await Promise.all(animalPromises);
-      setAnimalsList(results.flat());
+      }
+      setAnimalsList(allAnimals);
     } catch (err) {
       console.log('Error fetching dashboard animals:', err);
     } finally {
@@ -482,10 +490,7 @@ export default function SubAdminDashboard() {
           </View>
 
           {farmersLoading && farmers.length === 0 ? (
-            <View style={styles.tabLoadingContainer}>
-              <ActivityIndicator size="large" color={COLORS.brandGreen} />
-              <Text style={styles.tabLoadingText}>Loading your assigned farmers...</Text>
-            </View>
+            <FarmerCardSkeleton count={4} />
           ) : (
             <FlatList
               data={filteredFarmers}
@@ -689,11 +694,14 @@ export default function SubAdminDashboard() {
             ) : null}
           </View>
 
-          <FlatList
-            data={filteredAnimals}
-            keyExtractor={(item) => String(item.animal_id)}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.listContent}
+          {animalsLoading && animalsList.length === 0 ? (
+            <FarmerCardSkeleton count={4} />
+          ) : (
+            <FlatList
+              data={filteredAnimals}
+              keyExtractor={(item) => String(item.animal_id)}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.listContent}
             renderItem={({ item }) => {
               const isCow = item.animal_type?.toLowerCase().includes('cow');
 
@@ -792,7 +800,8 @@ export default function SubAdminDashboard() {
               </View>
             }
           />
-        </View>
+        )}
+      </View>
       )}
 
       {/* ================= ANIMAL DETAILS MODAL ================= */}

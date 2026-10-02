@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  SafeAreaView,
   Image,
   Alert,
   StatusBar,
@@ -16,13 +15,15 @@ import {
   TextInput,
   KeyboardAvoidingView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import axios from 'axios';
 import {
   getFarmerById,
   getAnimalsByFarmerId,
+  createAnimal,
+  updateAnimal,
   deleteAnimal,
   deleteFarmer,
   getProcurementByFarmerId,
@@ -32,6 +33,7 @@ import {
   calculateTotalAmount,
   DailyProcurementDateGroup,
 } from '@/src/services/dairyApi';
+import { FarmerOverviewSkeleton, ShimmerBlock } from '@/components/Shimmer';
 
 // ----------------------------------------------------
 // TYPES
@@ -67,31 +69,6 @@ export interface AnimalItem {
   milk_capacity?: string;
   milk_details?: string;
 }
-
-// ----------------------------------------------------
-// API ENDPOINTS (Postman Collection)
-// ----------------------------------------------------
-
-const GET_FARMER_BY_ID_URL =
-  'http://macsof.in/milkmanagement/api/farmergetbyid';
-
-const DELETE_FARMER_URL =
-  'http://macsof.in/milkmanagement/api/farmerdelete';
-
-const GET_ANIMALS_BY_FARMER_URL =
-  'http://macsof.in/milkmanagement/api/farmeridbyanimals';
-
-const ANIMAL_CREATE_URL =
-  'http://macsof.in/milkmanagement/api/animalcreate';
-
-const ANIMAL_UPDATE_URL =
-  'http://macsof.in/milkmanagement/api/animalupdate';
-
-const ANIMAL_DELETE_URL =
-  'http://macsof.in/milkmanagement/api/animaldelete';
-
-const ANIMAL_GET_BY_ID_URL =
-  'http://macsof.in/milkmanagement/api/animalgetbyid';
 
 // ----------------------------------------------------
 // THEME COLORS (Canaan Dairy Super Admin Theme)
@@ -181,6 +158,7 @@ export default function SuperAdminFarmerOverview() {
   const [animalsLoading, setAnimalsLoading] = useState(false);
   const [animalsError, setAnimalsError] = useState(false);
   const [animalsErrorMessage, setAnimalsErrorMessage] = useState('');
+  const [avatarError, setAvatarError] = useState(false);
 
   // Modals State
   const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
@@ -566,7 +544,6 @@ export default function SuperAdminFarmerOverview() {
     }
 
     setSavingAnimal(true);
-    const url = ANIMAL_CREATE_URL;
 
     try {
       const formData = new FormData();
@@ -583,33 +560,25 @@ export default function SuperAdminFarmerOverview() {
         } as any);
       }
 
-      const response = await axios.post(url, formData, {
-        headers: {
-          'Auth-Key': 'canandairyApi',
-        },
-        timeout: 20000,
-      });
+      const response = await createAnimal(formData);
 
-      const isSuccess =
-        response.data?.status === 200 ||
-        response.data?.status === '200' ||
-        response.data?.status === true;
+      const isSuccess = Number(response?.status) === 200;
 
       if (isSuccess) {
-        Alert.alert('Success', response.data?.message || 'Animal added successfully.');
+        Alert.alert('Success', response?.message || 'Animal added successfully.');
         setAddAnimalModalVisible(false);
         setNewAnimalType('Cow');
         setCustomAnimalType('');
         setNewVaccinationImage(null);
         if (farmer_id) loadOverviewData(String(farmer_id), true);
       } else {
-        Alert.alert('Failed', response.data?.message || 'Could not add animal.');
+        Alert.alert('Failed', response?.message || 'Could not add animal.');
       }
     } catch (err: any) {
       console.log('Animal create error:', err);
       Alert.alert(
         'Error',
-        err?.response?.data?.message || 'Unable to add animal. Please check your network connection.'
+        err?.response?.data?.message || err?.message || 'Unable to add animal. Please check your network connection.'
       );
     } finally {
       setSavingAnimal(false);
@@ -644,7 +613,6 @@ export default function SuperAdminFarmerOverview() {
     }
 
     setUpdatingAnimal(true);
-    const url = ANIMAL_UPDATE_URL;
 
     try {
       const formData = new FormData();
@@ -662,32 +630,24 @@ export default function SuperAdminFarmerOverview() {
         } as any);
       }
 
-      const response = await axios.post(url, formData, {
-        headers: {
-          'Auth-Key': 'canandairyApi',
-        },
-        timeout: 20000,
-      });
+      const response = await updateAnimal(formData);
 
-      const isSuccess =
-        response.data?.status === 200 ||
-        response.data?.status === '200' ||
-        response.data?.status === true;
+      const isSuccess = Number(response?.status) === 200;
 
       if (isSuccess) {
-        Alert.alert('Success', response.data?.message || 'Animal updated successfully.');
+        Alert.alert('Success', response?.message || 'Animal updated successfully.');
         setEditAnimalModalVisible(false);
         setEditingAnimal(null);
         setEditVaccinationImage(null);
         if (farmer_id) loadOverviewData(String(farmer_id), true);
       } else {
-        Alert.alert('Failed', response.data?.message || 'Could not update animal.');
+        Alert.alert('Failed', response?.message || 'Could not update animal.');
       }
     } catch (err: any) {
       console.log('Animal update error:', err);
       Alert.alert(
         'Error',
-        err?.response?.data?.message || 'Unable to update animal. Please check connection.'
+        err?.response?.data?.message || err?.message || 'Unable to update animal. Please check connection.'
       );
     } finally {
       setUpdatingAnimal(false);
@@ -766,7 +726,7 @@ export default function SuperAdminFarmerOverview() {
   // RENDER: LOADING & ERROR STATES
   // ----------------------------------------------------
 
-  if (loading) {
+  if (loading && !farmer) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor={COLORS.statusBarBg} />
@@ -780,10 +740,7 @@ export default function SuperAdminFarmerOverview() {
           </View>
         </View>
 
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={COLORS.brandGreen} />
-          <Text style={styles.loadingText}>Loading complete farmer details...</Text>
-        </View>
+        <FarmerOverviewSkeleton />
       </SafeAreaView>
     );
   }
@@ -893,11 +850,12 @@ export default function SuperAdminFarmerOverview() {
         {/* Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatarWrapper}>
-            {farmer.profile?.trim() ? (
+            {farmer.profile?.trim() && !avatarError ? (
               <Image
                 source={{ uri: farmer.profile }}
                 style={styles.avatar}
                 resizeMode="cover"
+                onError={() => setAvatarError(true)}
               />
             ) : (
               <View style={styles.avatarFallback}>
@@ -1025,10 +983,10 @@ export default function SuperAdminFarmerOverview() {
           </View>
 
           {/* Animals Loading State */}
-          {animalsLoading ? (
-            <View style={styles.animalsLoaderWrap}>
-              <ActivityIndicator size="small" color={COLORS.brandGreen} />
-              <Text style={styles.animalsLoaderText}>Loading farmer's animals...</Text>
+          {animalsLoading && animals.length === 0 ? (
+            <View style={{ paddingVertical: 10 }}>
+              <ShimmerBlock width="100%" height={68} borderRadius={12} />
+              <ShimmerBlock width="100%" height={68} borderRadius={12} style={{ marginTop: 8 }} />
             </View>
           ) : animalsError ? (
             <View style={styles.animalsErrorBox}>
@@ -1232,10 +1190,11 @@ export default function SuperAdminFarmerOverview() {
           </View>
 
           {/* Loading */}
-          {procurementsLoading ? (
-            <View style={styles.animalsLoaderWrap}>
-              <ActivityIndicator size="small" color={COLORS.brandGreen} />
-              <Text style={styles.animalsLoaderText}>Loading milk procurement records...</Text>
+          {procurementsLoading && procurements.length === 0 ? (
+            <View style={{ paddingVertical: 10 }}>
+              <ShimmerBlock width="100%" height={44} borderRadius={8} />
+              <ShimmerBlock width="100%" height={44} borderRadius={8} style={{ marginTop: 8 }} />
+              <ShimmerBlock width="100%" height={44} borderRadius={8} style={{ marginTop: 8 }} />
             </View>
           ) : procurements.length === 0 ? (
             <View style={styles.emptyAnimalsBox}>

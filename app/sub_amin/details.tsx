@@ -1,15 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
   StatusBar,
+  Modal,
+  TextInput,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
+import { changePassword } from '@/src/services/dairyApi';
+import { getUserSession } from '@/src/authStorage';
 
 export default function SubAdminDetailsScreen() {
   const params = useLocalSearchParams<{
@@ -34,6 +40,79 @@ export default function SubAdminDetailsScreen() {
   } = params;
 
   const [showPassword, setShowPassword] = useState(false);
+  const [resolvedAdminId, setResolvedAdminId] = useState(id);
+
+  // Change Password state
+  const [changePwdVisible, setChangePwdVisible] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  useEffect(() => {
+    if (!resolvedAdminId) {
+      getUserSession().then((session) => {
+        if (session?.admin_id) {
+          setResolvedAdminId(session.admin_id);
+        }
+      });
+    }
+  }, [resolvedAdminId]);
+
+  const handleChangePasswordSubmit = async () => {
+    if (!resolvedAdminId) {
+      Alert.alert('Error', 'Sub Admin ID could not be determined.');
+      return;
+    }
+    if (!currentPassword.trim()) {
+      Alert.alert('Validation', 'Please enter your current password.');
+      return;
+    }
+    if (!newPassword.trim() || newPassword.trim().length < 4) {
+      Alert.alert('Validation', 'New password must be at least 4 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Validation', 'New password and confirmation do not match.');
+      return;
+    }
+
+    try {
+      setChangingPassword(true);
+      const res = await changePassword(
+        resolvedAdminId,
+        currentPassword.trim(),
+        newPassword.trim()
+      );
+
+      if (res?.status === 200 || res?.status === '200' || res?.status === true) {
+        Alert.alert(
+          'Success',
+          res?.message || 'Password changed successfully!',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                setChangePwdVisible(false);
+                setCurrentPassword('');
+                setNewPassword('');
+                setConfirmPassword('');
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Failed',
+          res?.message || res?.result || 'Failed to change password. Please verify current password.'
+        );
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Something went wrong while updating password.');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
 
   const details = [
     { label: 'Name', value: name, icon: 'person-outline' as const },
@@ -80,7 +159,7 @@ export default function SubAdminDetailsScreen() {
             <Ionicons name={item.icon} size={18} color="#4CAF50" />
             <View style={styles.detailTextWrap}>
               <Text style={styles.detailLabel}>{item.label}</Text>
-              <Text style={styles.detailValue}>{item.value}</Text>
+              <Text style={styles.detailValue}>{item.value || '-'}</Text>
             </View>
           </View>
         ))}
@@ -105,6 +184,16 @@ export default function SubAdminDetailsScreen() {
           </View>
         </View>
 
+        {/* Change Password Trigger Button */}
+        <TouchableOpacity
+          style={styles.changePasswordBtn}
+          onPress={() => setChangePwdVisible(true)}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="key-outline" size={18} color="#2E7D32" />
+          <Text style={styles.changePasswordBtnText}>Change Account Password</Text>
+        </TouchableOpacity>
+
         {/* Action buttons */}
         <View style={styles.actionsWrap}>
           <TouchableOpacity style={styles.actionBtn} onPress={handleViewMilkCollection}>
@@ -118,6 +207,93 @@ export default function SubAdminDetailsScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Change Password Modal */}
+      <Modal
+        visible={changePwdVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !changingPassword && setChangePwdVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Change Password</Text>
+              <TouchableOpacity
+                onPress={() => !changingPassword && setChangePwdVisible(false)}
+                disabled={changingPassword}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              Update your account password using the secure dairy management API.
+            </Text>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Current Password</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
+                placeholder="Enter current password"
+                placeholderTextColor="#999"
+                secureTextEntry
+                editable={!changingPassword}
+              />
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>New Password</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                placeholder="Enter new password"
+                placeholderTextColor="#999"
+                secureTextEntry
+                editable={!changingPassword}
+              />
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Confirm New Password</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                placeholder="Re-enter new password"
+                placeholderTextColor="#999"
+                secureTextEntry
+                editable={!changingPassword}
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setChangePwdVisible(false)}
+                disabled={changingPassword}
+              >
+                <Text style={styles.modalCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalSubmitBtn, changingPassword && styles.btnDisabled]}
+                onPress={handleChangePasswordSubmit}
+                disabled={changingPassword}
+              >
+                {changingPassword ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.modalSubmitBtnText}>Update</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -208,5 +384,109 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '700',
+  },
+  changePasswordBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E8F5E9',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+    paddingVertical: 13,
+    marginBottom: 14,
+    gap: 8,
+  },
+  changePasswordBtnText: {
+    color: '#2E7D32',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#161616',
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 16,
+    lineHeight: 18,
+  },
+  modalInputGroup: {
+    marginBottom: 12,
+  },
+  modalLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#444',
+    marginBottom: 6,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#161616',
+    backgroundColor: '#FAFAFA',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 16,
+  },
+  modalCancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#eee',
+  },
+  modalCancelBtnText: {
+    color: '#555',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  modalSubmitBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#4CAF50',
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  modalSubmitBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  btnDisabled: {
+    opacity: 0.6,
   },
 });

@@ -11,42 +11,15 @@ import {
   useWindowDimensions,
   StatusBar,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import axios, { AxiosError } from 'axios';
-
-interface Farmer {
-  farmer_id: string | number;
-  farmer_name?: string;
-  mobile_number?: string;
-  profile?: string;
-  aadhar_number?: string;
-  address?: string;
-  status?: string | number;
-  created_at?: string;
-  updated_at?: string;
-  admin_id?: string | number;
-  code?: string;
-}
-
-interface ApiResponse {
-  status?: number | string;
-  message?: string;
-  data?: Farmer[];
-}
-
-const API_BASE_URL =
-  'http://macsof.in/milkmanagement/api';
-
-const GET_FARMERS_URL =
-  `${API_BASE_URL}/getfarmersbyadmin`;
-
-const API_HEADERS = {
-  'Auth-Key': 'canandairyApi',
-  Accept: 'application/json',
-  'Content-Type': 'application/json',
-};
+import {
+  getFarmersByAdmin,
+  getAllFarmers,
+  Farmer,
+} from '@/src/services/dairyApi';
+import { FarmerCardSkeleton } from '@/components/Shimmer';
 
 const formatDate = (raw?: string) => {
   if (!raw) {
@@ -86,11 +59,12 @@ export default function MyFarmers() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [failedFarmerImages, setFailedFarmerImages] = useState<Record<string, boolean>>({});
 
   /**
-   * Fetch farmers assigned to admin/sub-admin.
+   * Fetch farmers assigned to admin/sub-admin with caching and parallel fetch.
    */
-  const fetchFarmersByAdmin = useCallback(async () => {
+  const fetchFarmersByAdmin = useCallback(async (force = false) => {
     try {
       setError(false);
       setErrorMessage('');
@@ -98,54 +72,9 @@ export default function MyFarmers() {
       let farmerData: Farmer[] = [];
 
       if (adminId) {
-        // Fetch farmers assigned to this specific Sub-Admin
-        const response = await axios.post<ApiResponse>(
-          GET_FARMERS_URL,
-          { admin_id: Number(adminId) },
-          { headers: API_HEADERS, timeout: 20000 }
-        );
-
-        const isSuccess =
-          response.data?.status === 200 ||
-          response.data?.status === '200' ||
-          (response.data?.status as any) === true;
-
-        if (isSuccess && Array.isArray(response.data?.data)) {
-          farmerData = response.data.data;
-        } else if (response.data?.status === 404) {
-          farmerData = [];
-        }
+        farmerData = await getFarmersByAdmin(adminId, force);
       } else {
-        // Super Admin viewing all farmers across all sub-admins
-        const subRes = await axios.get(`${API_BASE_URL}/getallsubadmins`, {
-          headers: API_HEADERS,
-          timeout: 20000,
-        });
-
-        const subadmins: { admin_id: string }[] = subRes.data?.data || [];
-        const promises = subadmins.map((s) =>
-          axios
-            .post(
-              GET_FARMERS_URL,
-              { admin_id: Number(s.admin_id) },
-              { headers: API_HEADERS, timeout: 15000 }
-            )
-            .then((r) => (Array.isArray(r.data?.data) ? r.data.data : []))
-            .catch(() => [])
-        );
-
-        const allResults = await Promise.all(promises);
-        const combined = allResults.flat();
-
-        // Deduplicate by farmer_id
-        const seen = new Set<string>();
-        for (const f of combined) {
-          const fid = String(f.farmer_id);
-          if (!seen.has(fid)) {
-            seen.add(fid);
-            farmerData.push(f);
-          }
-        }
+        farmerData = await getAllFarmers(force);
       }
 
       setFarmers(farmerData);
@@ -155,20 +84,27 @@ export default function MyFarmers() {
       console.log('[SUPER ADMIN MY FARMERS ERROR]:', error);
       if (error?.response?.status === 404) {
         setFarmers([]);
+        setError(false);
       } else {
-        setFarmers([]);
-        setError(true);
-        setErrorMessage(
-          error?.response?.data?.message || 'Unable to retrieve farmers.'
-        );
+        setFarmers((prev) => {
+          if (prev.length > 0) {
+            return prev;
+          }
+          setError(true);
+          setErrorMessage(
+            error?.response?.data?.message || error?.message || 'Unable to retrieve farmers.'
+          );
+          return [];
+        });
       }
+    } finally {
+      setLoading(false);
     }
   }, [adminId]);
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
-      fetchFarmersByAdmin().finally(() => setLoading(false));
+      fetchFarmersByAdmin(false);
     }, [fetchFarmersByAdmin])
   );
 
@@ -178,12 +114,8 @@ export default function MyFarmers() {
     }
 
     setRefreshing(true);
-
-    try {
-      await fetchFarmersByAdmin();
-    } finally {
-      setRefreshing(false);
-    }
+    await fetchFarmersByAdmin(true);
+    setRefreshing(false);
   };
 
   const handleView = (item: Farmer) => {
@@ -207,6 +139,36 @@ export default function MyFarmers() {
         status: String(item.status ?? '1'),
         profile: item.profile || '',
         created_at: item.created_at || '',
+      },
+    });
+  };
+
+  const handleRecordMilk = (item: Farmer) => {
+    if (!item.farmer_id) {
+      console.log('[RECORD MILK] Farmer ID missing');
+      return;
+    }
+
+    console.log('[SUPER ADMIN] Navigating to Record Daily Procurement for Farmer:', {
+      farmer_id: item.farmer_id,
+      farmer_name: item.farmer_name,
+      admin_id: item.admin_id ?? adminId,
+    });
+
+    router.push({
+      pathname: '/sub_amin/daily_procurement' as any,
+      params: {
+        farmer_id: String(item.farmer_id),
+        admin_id: String(item.admin_id ?? adminId ?? ''),
+        farmer_name: item.farmer_name || '',
+        code: item.code || '',
+        mobile_number: item.mobile_number || '',
+        aadhar_number: item.aadhar_number || '',
+        address: item.address || '',
+        status: String(item.status ?? '1'),
+        profile: item.profile || '',
+        created_at: item.created_at || '',
+        open_record: 'true',
       },
     });
   };
@@ -297,18 +259,15 @@ export default function MyFarmers() {
         ]}
       >
         <View style={styles.profileSection}>
-          {item.profile?.trim() ? (
+          {item.profile?.trim() && !failedFarmerImages[item.farmer_id] ? (
             <Image
               source={{
                 uri: item.profile,
               }}
               style={styles.avatar}
               resizeMode="cover"
-              onError={(event) => {
-                console.log(
-                  '[FARMER IMAGE ERROR]',
-                  event.nativeEvent.error,
-                );
+              onError={() => {
+                setFailedFarmerImages((prev) => ({ ...prev, [item.farmer_id]: true }));
               }}
             />
           ) : (
@@ -452,21 +411,38 @@ export default function MyFarmers() {
           </View>
         </View>
 
-        <TouchableOpacity
-          style={styles.viewMoreButton}
-          activeOpacity={0.85}
-          onPress={() => handleView(item)}
-        >
-          <Text style={styles.viewMoreText}>
-            View More
-          </Text>
+        <View style={styles.actionsRow}>
+          <TouchableOpacity
+            style={styles.recordMilkButton}
+            activeOpacity={0.85}
+            onPress={() => handleRecordMilk(item)}
+          >
+            <MaterialCommunityIcons
+              name="water-plus"
+              size={18}
+              color="#FFFFFF"
+            />
+            <Text style={styles.recordMilkText}>
+              Record Milk
+            </Text>
+          </TouchableOpacity>
 
-          <Ionicons
-            name="arrow-forward"
-            size={18}
-            color="#FFFFFF"
-          />
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.viewMoreButton}
+            activeOpacity={0.85}
+            onPress={() => handleView(item)}
+          >
+            <Text style={styles.viewMoreText}>
+              View More
+            </Text>
+
+            <Ionicons
+              name="arrow-forward"
+              size={18}
+              color="#FFFFFF"
+            />
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -488,16 +464,7 @@ export default function MyFarmers() {
 
         {renderHeader()}
 
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator
-            size="large"
-            color="#4CAF50"
-          />
-
-          <Text style={styles.loadingText}>
-            Loading farmers...
-          </Text>
-        </View>
+        <FarmerCardSkeleton count={5} />
       </SafeAreaView>
     );
   }
@@ -539,7 +506,7 @@ export default function MyFarmers() {
 
           <TouchableOpacity
             style={styles.retryButton}
-            onPress={fetchFarmersByAdmin}
+            onPress={() => fetchFarmersByAdmin(true)}
             activeOpacity={0.85}
           >
             <Ionicons
@@ -872,14 +839,47 @@ const styles = StyleSheet.create({
     color: '#999999',
   },
 
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 4,
+  },
+
+  recordMilkButton: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#1F5E4A',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    shadowColor: '#1F5E4A',
+    shadowOpacity: 0.22,
+    shadowRadius: 5,
+    shadowOffset: {
+      width: 0,
+      height: 3,
+    },
+    elevation: 2,
+  },
+
+  recordMilkText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
   viewMoreButton: {
+    flex: 1,
     height: 44,
     borderRadius: 10,
     backgroundColor: '#4CAF50',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
     shadowColor: '#4CAF50',
     shadowOpacity: 0.18,
     shadowRadius: 5,

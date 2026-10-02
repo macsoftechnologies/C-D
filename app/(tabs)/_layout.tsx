@@ -18,9 +18,9 @@ export default function TabLayout() {
   }, []);
 
   if (showSplash) {
-    return <SplashScreen/>;
+    return <SplashScreen />;
   }
 
-  return <Onboarding/>;
-  
+  return <Onboarding />;
+
 }
