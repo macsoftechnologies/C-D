@@ -7,12 +7,10 @@
     "icon": "./assets/images/icon.png",
     "scheme": "canaandairy",
     "userInterfaceStyle": "automatic",
-
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.canaandairy.app"
     },
-
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
@@ -22,7 +20,6 @@
       "package": "com.canaandairy.app",
       "versionCode": 1
     },
-
     "plugins": [
       "expo-router",
       [
@@ -51,17 +48,16 @@
         }
       ]
     ],
-
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
-
     "extra": {
       "router": {},
-      "eas": {}
+      "eas": {
+        "projectId": "ca6eb585-17c0-4a7a-993d-9f8296f17702"
+      }
     },
-
     "owner": "v_varsha"
   }
 }
