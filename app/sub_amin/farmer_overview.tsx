@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -32,6 +32,7 @@ import {
   calculateTotalMilk,
   calculateTotalAmount,
   DailyProcurementDateGroup,
+  addFarmerBankDetails,
 } from '@/src/services/dairyApi';
 import { FarmerOverviewSkeleton, ShimmerBlock } from '@/components/Shimmer';
 
@@ -51,6 +52,15 @@ interface Farmer {
   updated_at: string;
   admin_id: string;
   code: string;
+  total_amount?: number;
+  total_liters?: number;
+  total_procurements?: number;
+  today_amount?: number;
+  today_liters?: number;
+  branch_name?: string;
+  account_number?: string;
+  ifsc_code?: string;
+  account_holder_name?: string;
 }
 
 export interface AnimalItem {
@@ -124,6 +134,11 @@ export default function SubAdminFarmerOverview() {
     status?: string;
     profile?: string;
     created_at?: string;
+    total_amount?: string;
+    total_liters?: string;
+    total_procurements?: string;
+    today_amount?: string;
+    today_liters?: string;
   }>();
 
   const farmer_id = params.farmer_id;
@@ -143,6 +158,11 @@ export default function SubAdminFarmerOverview() {
         updated_at: '',
         admin_id: params.admin_id || '',
         code: params.code || '',
+        total_amount: params.total_amount ? parseFloat(params.total_amount) : undefined,
+        total_liters: params.total_liters ? parseFloat(params.total_liters) : undefined,
+        total_procurements: params.total_procurements ? parseInt(params.total_procurements, 10) : undefined,
+        today_amount: params.today_amount ? parseFloat(params.today_amount) : undefined,
+        today_liters: params.today_liters ? parseFloat(params.today_liters) : undefined,
       }
       : null;
 
@@ -190,10 +210,111 @@ export default function SubAdminFarmerOverview() {
   const [procRate, setProcRate] = useState('35.00');
   const [savingProcurement, setSavingProcurement] = useState(false);
 
+  // Bank Details State
+  const [bankModalVisible, setBankModalVisible] = useState(false);
+  const [bankBranch, setBankBranch] = useState('');
+  const [bankAccountHolder, setBankAccountHolder] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankIfsc, setBankIfsc] = useState('');
+  const [savingBank, setSavingBank] = useState(false);
+
   const farmerRef = React.useRef<Farmer | null>(null);
   React.useEffect(() => {
     farmerRef.current = farmer;
+    if (farmer) {
+      setBankBranch(farmer.branch_name || '');
+      setBankAccountHolder(farmer.account_holder_name || '');
+      setBankAccountNumber(farmer.account_number || '');
+      setBankIfsc(farmer.ifsc_code || '');
+    }
   }, [farmer]);
+
+  const handleSaveBankDetails = async () => {
+    if (!farmer_id) return;
+    if (!bankAccountHolder.trim()) {
+      Alert.alert('Validation Error', 'Please enter account holder name.');
+      return;
+    }
+    if (!bankAccountNumber.trim()) {
+      Alert.alert('Validation Error', 'Please enter account number.');
+      return;
+    }
+    if (!bankIfsc.trim()) {
+      Alert.alert('Validation Error', 'Please enter IFSC code.');
+      return;
+    }
+    if (!bankBranch.trim()) {
+      Alert.alert('Validation Error', 'Please enter branch name.');
+      return;
+    }
+
+    try {
+      setSavingBank(true);
+      const res = await addFarmerBankDetails({
+        farmer_id: farmer_id,
+        branch_name: bankBranch.trim(),
+        account_holder_name: bankAccountHolder.trim(),
+        account_number: bankAccountNumber.trim(),
+        ifsc_code: bankIfsc.trim().toUpperCase(),
+      });
+
+      const isOk =
+        res?.status === 200 ||
+        (res?.status as any) === '200' ||
+        (res?.status as any) === true;
+
+      if (isOk) {
+        Alert.alert('Success', res?.message || 'Bank Details Successfully Added.', [
+          {
+            text: 'OK',
+            onPress: () => {
+              setBankModalVisible(false);
+              loadOverviewData(String(farmer_id), true);
+            },
+          },
+        ]);
+      } else {
+        Alert.alert('Failed', res?.message || 'Could not update bank details.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Network error while updating bank details.');
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
+  // Computed Totals as fallback if API response totals are not present
+  const computedTotals = useMemo(() => {
+    let liters = 0;
+    let amount = 0;
+    let count = 0;
+    let todayLiters = 0;
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    for (const group of procurements) {
+      const isToday = group.date === todayStr;
+      const mRecs = group.morning_shift?.records || [];
+      const eRecs = group.evening_shift?.records || [];
+      for (const r of [...mRecs, ...eRecs]) {
+        count++;
+        const l = parseFloat(r.liters) || 0;
+        const rate = parseFloat(r.rate) || 35;
+        const amt = parseFloat(r.amount) || l * rate;
+        liters += l;
+        amount += amt;
+        if (isToday) {
+          todayLiters += l;
+        }
+      }
+    }
+
+    return {
+      liters,
+      amount,
+      count,
+      todayLiters,
+    };
+  }, [procurements]);
 
   const lastLoadedFarmerIdRef = React.useRef<string | null>(null);
   const isLoadingOverviewRef = React.useRef<boolean>(false);
@@ -214,6 +335,11 @@ export default function SubAdminFarmerOverview() {
         updated_at: '',
         admin_id: params.admin_id || '',
         code: params.code || '',
+        total_amount: params.total_amount ? parseFloat(params.total_amount) : undefined,
+        total_liters: params.total_liters ? parseFloat(params.total_liters) : undefined,
+        total_procurements: params.total_procurements ? parseInt(params.total_procurements, 10) : undefined,
+        today_amount: params.today_amount ? parseFloat(params.today_amount) : undefined,
+        today_liters: params.today_liters ? parseFloat(params.today_liters) : undefined,
       });
       setLoading(false);
     } else {
@@ -253,9 +379,9 @@ export default function SubAdminFarmerOverview() {
 
       try {
         const [farmerRes, animalsRes, procRes] = await Promise.allSettled([
-          getFarmerById(targetId),
+          getFarmerById(targetId, force),
           getAnimalsByFarmerId(targetId, force),
-          getProcurementByFarmerId(targetId),
+          getProcurementByFarmerId(targetId, force),
         ]);
 
         if (farmerRes.status === 'fulfilled' && farmerRes.value) {
@@ -402,7 +528,7 @@ export default function SubAdminFarmerOverview() {
   useFocusEffect(
     useCallback(() => {
       if (farmer_id && lastLoadedFarmerIdRef.current !== String(farmer_id)) {
-        loadOverviewData(String(farmer_id), true);
+        loadOverviewData(String(farmer_id), false);
       }
     }, [farmer_id, loadOverviewData])
   );
@@ -865,6 +991,51 @@ export default function SubAdminFarmerOverview() {
           ) : null}
         </View>
 
+        {/* Collection & Procurement Statistics Card (API Totals) */}
+        <View style={styles.sectionCard}>
+          <View style={styles.titleWithIcon}>
+            <MaterialCommunityIcons name="chart-box-outline" size={20} color={COLORS.brandGreen} />
+            <Text style={styles.sectionTitle}>Procurement & Milk Collection</Text>
+          </View>
+          <Text style={styles.animalsSubhead}>Aggregated totals from Canaan Dairy API</Text>
+
+          <View style={styles.statsGrid}>
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>Total Collections</Text>
+              <Text style={styles.statValue}>
+                {farmer.total_procurements ?? (computedTotals.count || procurements.length)}
+              </Text>
+            </View>
+
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>Total Milk</Text>
+              <Text style={styles.statValue}>
+                {farmer.total_liters !== undefined
+                  ? `${Number(farmer.total_liters).toFixed(1)} L`
+                  : `${computedTotals.liters.toFixed(1)} L`}
+              </Text>
+            </View>
+
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>Total Paid</Text>
+              <Text style={[styles.statValue, { color: '#2E7D32' }]}>
+                ₹{farmer.total_amount !== undefined
+                  ? Number(farmer.total_amount).toFixed(2)
+                  : computedTotals.amount.toFixed(2)}
+              </Text>
+            </View>
+
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>Today's Milk</Text>
+              <Text style={styles.statValue}>
+                {farmer.today_liters !== undefined
+                  ? `${Number(farmer.today_liters).toFixed(1)} L`
+                  : `${computedTotals.todayLiters.toFixed(1)} L`}
+              </Text>
+            </View>
+          </View>
+        </View>
+
         {/* Detailed Farmer Information Section */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Farmer Information</Text>
@@ -905,6 +1076,54 @@ export default function SubAdminFarmerOverview() {
             icon="time-outline"
             label="Last Updated"
             value={formatDate(farmer.updated_at)}
+            isLast
+          />
+        </View>
+
+        {/* ==================================================== */}
+        {/* BANK ACCOUNT DETAILS SECTION                         */}
+        {/* ==================================================== */}
+        <View style={styles.sectionCard}>
+          <View style={styles.animalsHeaderRow}>
+            <View>
+              <View style={styles.titleWithIcon}>
+                <MaterialCommunityIcons name="bank" size={20} color={COLORS.brandGreen} />
+                <Text style={styles.sectionTitle}>Bank Account Details</Text>
+              </View>
+              <Text style={styles.animalsSubhead}>Official settlement account</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.addAnimalBtn}
+              activeOpacity={0.85}
+              onPress={() => setBankModalVisible(true)}
+            >
+              <Ionicons name="create-outline" size={15} color="#FFFFFF" />
+              <Text style={styles.addAnimalBtnText}>
+                {farmer.account_number ? 'Edit Bank' : 'Add Bank'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <DetailItem
+            icon="person-outline"
+            label="Account Holder Name"
+            value={farmer.account_holder_name}
+          />
+          <DetailItem
+            icon="card-outline"
+            label="Account Number"
+            value={farmer.account_number}
+          />
+          <DetailItem
+            icon="barcode-outline"
+            label="IFSC Code"
+            value={farmer.ifsc_code ? farmer.ifsc_code.toUpperCase() : undefined}
+          />
+          <DetailItem
+            icon="business-outline"
+            label="Branch Name"
+            value={farmer.branch_name}
             isLast
           />
         </View>
@@ -1756,6 +1975,112 @@ export default function SubAdminFarmerOverview() {
           ) : null}
         </View>
       </Modal>
+
+      {/* ==================================================== */}
+      {/* MODAL: ADD / EDIT BANK DETAILS                       */}
+      {/* ==================================================== */}
+      <Modal
+        visible={bankModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => !savingBank && setBankModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <MaterialCommunityIcons name="bank" size={20} color={COLORS.brandGreen} />
+                <Text style={styles.modalTitle}>
+                  {farmer.account_number ? 'Update Bank Details' : 'Add Bank Details'}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => !savingBank && setBankModalVisible(false)}
+                style={styles.modalCloseBtn}
+                disabled={savingBank}
+              >
+                <Ionicons name="close" size={20} color={COLORS.textDark} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalSubtitle}>
+                Bank settlement account for farmer #{farmer_id} ({farmer.farmer_name}).
+              </Text>
+
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.inputLabel}>Account Holder Name *</Text>
+                <TextInput
+                  style={styles.customTypeInput}
+                  value={bankAccountHolder}
+                  onChangeText={setBankAccountHolder}
+                  placeholder="e.g. Varsha"
+                  placeholderTextColor="#999"
+                  editable={!savingBank}
+                />
+              </View>
+
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.inputLabel}>Account Number *</Text>
+                <TextInput
+                  style={styles.customTypeInput}
+                  value={bankAccountNumber}
+                  onChangeText={setBankAccountNumber}
+                  placeholder="e.g. 123456789012"
+                  placeholderTextColor="#999"
+                  keyboardType="numeric"
+                  editable={!savingBank}
+                />
+              </View>
+
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.inputLabel}>IFSC Code *</Text>
+                <TextInput
+                  style={styles.customTypeInput}
+                  value={bankIfsc}
+                  onChangeText={(t) => setBankIfsc(t.toUpperCase())}
+                  placeholder="e.g. SBIN0001234"
+                  placeholderTextColor="#999"
+                  autoCapitalize="characters"
+                  editable={!savingBank}
+                />
+              </View>
+
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.inputLabel}>Branch Name *</Text>
+                <TextInput
+                  style={styles.customTypeInput}
+                  value={bankBranch}
+                  onChangeText={setBankBranch}
+                  placeholder="e.g. Visakhapatnam Main"
+                  placeholderTextColor="#999"
+                  editable={!savingBank}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.modalSubmitBtn, savingBank && { opacity: 0.7 }]}
+                activeOpacity={0.85}
+                onPress={handleSaveBankDetails}
+                disabled={savingBank}
+              >
+                {savingBank ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                    <Text style={styles.modalSubmitBtnText}>Save Bank Details</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -2003,6 +2328,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 12,
+  },
+  statBox: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: '#F7F9F6',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E8EBE6',
+  },
+  statLabel: {
+    fontSize: 11.5,
+    color: '#6B6B60',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#161616',
   },
   detailRow: {
     flexDirection: 'row',

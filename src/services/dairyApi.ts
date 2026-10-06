@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Base API Configuration matching Postman collection
-export const BASE_API_URL = 'https://macsof.in/milkmanagement/api';
+export const BASE_API_URL = 'http://macsof.in/milkmanagement/api';
 export const AUTH_KEY = 'canandairyApi';
 
 export const DEFAULT_USER_AGENT =
@@ -96,6 +96,10 @@ export interface Farmer {
   total_procurements?: number;
   today_amount?: number;
   today_liters?: number;
+  branch_name?: string;
+  account_number?: string;
+  ifsc_code?: string;
+  account_holder_name?: string;
 }
 
 export interface SubadminItem {
@@ -107,14 +111,21 @@ export interface SubadminItem {
   address?: string;
   status?: string;
   created_at?: string;
+  updated_at?: string;
   role_id?: string;
   total_amount?: number;
   total_liters?: number;
   total_procurements?: number;
   today_amount?: number;
   today_liters?: number;
+  total_farmers?: number;
   otp?: string;
-  otp_expiry?: string;
+  otp_expiry?: string | null;
+  branch_name?: string;
+  account_number?: string;
+  ifsc_code?: string;
+  account_holder_name?: string;
+  farmers?: any[];
 }
 
 export interface Animal {
@@ -177,6 +188,7 @@ export interface SingleProcurementResponse {
 
 export interface CreateProcurementPayload {
   farmer_id: number | string;
+  admin_id?: number | string;
   shift: 'Morning' | 'Evening';
   procurements: {
     animal_id: number | string;
@@ -191,6 +203,28 @@ export interface SendOtpResponse {
   status: number | string;
   message: string;
   admin_id?: string;
+}
+
+export interface SubadminBankDetailsPayload {
+  admin_id: string | number;
+  branch_name: string;
+  account_holder_name: string;
+  account_number: string;
+  ifsc_code: string;
+}
+
+export interface FarmerBankDetailsPayload {
+  farmer_id: string | number;
+  branch_name: string;
+  account_holder_name: string;
+  account_number: string;
+  ifsc_code: string;
+}
+
+export interface BankDetailsResponse {
+  status: number | string;
+  message: string;
+  data?: any;
 }
 
 export function normalizeSubadmin(item: SubadminItem): SubadminItem {
@@ -227,7 +261,8 @@ const farmerByIdCache = new Map<string, { data: Farmer; timestamp: number }>();
 const animalsCache = new Map<string, { data: Animal[]; timestamp: number }>();
 const procurementCache = new Map<string, { data: FarmerProcurementResponse; timestamp: number }>();
 
-const CACHE_TTL_MS = 60 * 1000; // 1-minute TTL for fast navigation & low network usage
+const CACHE_TTL_MS = 3 * 60 * 1000; // 3-minute TTL for fast navigation & low network usage
+const PROCUREMENT_CACHE_TTL_MS = 2 * 60 * 1000; // 2-minute TTL for procurement records
 
 // In-flight request deduplication map to prevent parallel duplicate calls
 const inFlightRequests = new Map<string, Promise<any>>();
@@ -249,7 +284,7 @@ function dedupeRequest<T>(key: string, requestFn: () => Promise<T>): Promise<T> 
 export async function batchAllSettled<T, R>(
   items: T[],
   fn: (item: T) => Promise<R>,
-  concurrency = 6
+  concurrency = 8
 ): Promise<PromiseSettledResult<R>[]> {
   const results: PromiseSettledResult<R>[] = new Array(items.length);
   let currentIndex = 0;
@@ -285,8 +320,9 @@ export function invalidateFarmerCache(admin_id?: string | number) {
   } else {
     farmersCache.clear();
   }
+  farmersCache.delete('__ALL_FARMERS__');
   farmerByIdCache.clear();
-  procurementCache.clear();
+  subadminByIdCache.clear();
 }
 
 export function invalidateAnimalCache(farmer_id?: string | number) {
@@ -300,9 +336,12 @@ export function invalidateAnimalCache(farmer_id?: string | number) {
 export function invalidateProcurementCache(farmer_id?: string | number) {
   if (farmer_id !== undefined && farmer_id !== null) {
     procurementCache.delete(String(farmer_id));
+    farmerByIdCache.delete(String(farmer_id));
   } else {
     procurementCache.clear();
+    farmerByIdCache.clear();
   }
+  subadminByIdCache.clear();
 }
 
 // ----------------------------------------------------
@@ -499,8 +538,9 @@ export async function changePassword(
   } catch (err: any) {
     if (err?.response?.data) return err.response.data;
     return {
-      status: 500,
-      message: err?.message || 'Failed to change password.',
+      status: err?.response?.status || 500,
+      message: err?.response?.data?.message || err?.message || 'Failed to change password.',
+      result: err?.response?.data?.result,
     };
   }
 }
@@ -549,6 +589,33 @@ export async function resetPassword(
   }
 }
 
+/**
+ * Subadmin Bank Details Added / Updated
+ * Endpoint: POST /api/subadminbankdetails
+ * Body: { admin_id, branch_name, account_holder_name, account_number, ifsc_code }
+ */
+export async function addSubadminBankDetails(
+  payload: SubadminBankDetailsPayload
+): Promise<BankDetailsResponse> {
+  try {
+    const res = await apiClient.post('/subadminbankdetails', {
+      admin_id: Number(payload.admin_id),
+      branch_name: payload.branch_name.trim(),
+      account_holder_name: payload.account_holder_name.trim(),
+      account_number: payload.account_number.trim(),
+      ifsc_code: payload.ifsc_code.trim(),
+    });
+    invalidateSubadminCache();
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: err?.response?.status || 500,
+      message: err?.response?.data?.message || err?.message || 'Failed to add subadmin bank details.',
+    };
+  }
+}
+
 // ----------------------------------------------------
 // FARMER APIS (Matches Postman "Farmers" folder)
 // ----------------------------------------------------
@@ -588,14 +655,17 @@ export async function getFarmersByAdmin(
         list = res.data.map(normalizeFarmer);
       }
 
-      // Deduplicate by farmer_id
+      // Deduplicate by farmer_id and pre-cache individual records for instant overview
       const seen = new Set<string>();
       const uniqueList: Farmer[] = [];
+      const now = Date.now();
       for (const f of list) {
         const fid = String(f.farmer_id);
         if (!seen.has(fid)) {
           seen.add(fid);
           uniqueList.push(f);
+          // Pre-seed individual farmer cache so viewing details is instant (0ms)
+          farmerByIdCache.set(fid, { data: f, timestamp: now });
         }
       }
 
@@ -613,7 +683,7 @@ export async function getFarmersByAdmin(
 }
 
 /**
- * Get all farmers across all subadmins (Optimized Parallel Batch Fetch)
+ * Get all farmers across all subadmins (Optimized Parallel Concurrent Fetch)
  */
 export async function getAllFarmers(forceRefresh = false): Promise<Farmer[]> {
   const cacheKey = '__ALL_FARMERS__';
@@ -629,16 +699,15 @@ export async function getAllFarmers(forceRefresh = false): Promise<Farmer[]> {
       const subadmins = await getAllSubadmins(forceRefresh);
       if (!subadmins.length) return [];
 
-      const settled = await batchAllSettled(
-        subadmins,
-        async (s) => {
+      // Run all subadmin farmer fetches concurrently in parallel
+      const settled = await Promise.allSettled(
+        subadmins.map(async (s) => {
           const fList = await getFarmersByAdmin(s.admin_id, forceRefresh);
           return fList.map((f) => ({
             ...f,
             booth_name: f.booth_name || s.admin_name,
           }));
-        },
-        6
+        })
       );
 
       const combined: Farmer[] = [];
@@ -650,11 +719,14 @@ export async function getAllFarmers(forceRefresh = false): Promise<Farmer[]> {
 
       const seen = new Set<string>();
       const uniqueList: Farmer[] = [];
+      const now = Date.now();
       for (const f of combined) {
         const fid = String(f.farmer_id);
         if (!seen.has(fid)) {
           seen.add(fid);
           uniqueList.push(f);
+          // Pre-seed individual farmer cache
+          farmerByIdCache.set(fid, { data: f, timestamp: now });
         }
       }
 
@@ -781,6 +853,33 @@ export async function deleteFarmer(farmer_id: string | number): Promise<{ status
     return {
       status: 500,
       message: err?.message || 'Failed to delete farmer.',
+    };
+  }
+}
+
+/**
+ * Farmer Bank Details Added / Updated
+ * Endpoint: POST /api/farmerbankdetails
+ * Body: { farmer_id, branch_name, account_holder_name, account_number, ifsc_code }
+ */
+export async function addFarmerBankDetails(
+  payload: FarmerBankDetailsPayload
+): Promise<BankDetailsResponse> {
+  try {
+    const res = await apiClient.post('/farmerbankdetails', {
+      farmer_id: Number(payload.farmer_id),
+      branch_name: payload.branch_name.trim(),
+      account_holder_name: payload.account_holder_name.trim(),
+      account_number: payload.account_number.trim(),
+      ifsc_code: payload.ifsc_code.trim(),
+    });
+    invalidateFarmerCache(payload.farmer_id);
+    return res.data;
+  } catch (err: any) {
+    if (err?.response?.data) return err.response.data;
+    return {
+      status: err?.response?.status || 500,
+      message: err?.response?.data?.message || err?.message || 'Failed to add farmer bank details.',
     };
   }
 }
@@ -943,8 +1042,9 @@ export async function createDailyProcurement(
 ): Promise<{ status: number | string; message: string; count?: number }> {
   try {
     const res = await apiClient.post('/createdailyprocurement', payload);
-    invalidateFarmerCache();
+    // Invalidate ONLY the procurement cache and totals for this specific farmer, NOT the entire farmers list
     invalidateProcurementCache(payload.farmer_id);
+    farmerByIdCache.delete(String(payload.farmer_id));
     return res.data;
   } catch (err: any) {
     if (err?.response?.data) return err.response.data;
@@ -967,7 +1067,7 @@ export async function getProcurementByFarmerId(
 
   if (!forceRefresh) {
     const cached = procurementCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < 30000) {
+    if (cached && Date.now() - cached.timestamp < PROCUREMENT_CACHE_TTL_MS) {
       return cached.data;
     }
   }
@@ -978,23 +1078,28 @@ export async function getProcurementByFarmerId(
         farmer_id: Number(farmer_id),
       });
       const responseData = res.data || {};
+      const normalizedFarmer = responseData.farmer_details ? normalizeFarmer(responseData.farmer_details) : undefined;
       const normalizedData: FarmerProcurementResponse = {
         status: responseData.status ?? 200,
         message: responseData.message || '',
-        farmer_details: responseData.farmer_details ? normalizeFarmer(responseData.farmer_details) : undefined,
+        farmer_details: normalizedFarmer,
         procurement_data: Array.isArray(responseData.procurement_data)
           ? responseData.procurement_data
           : [],
       };
       procurementCache.set(cacheKey, { data: normalizedData, timestamp: Date.now() });
+      if (normalizedFarmer) {
+        farmerByIdCache.set(cacheKey, { data: normalizedFarmer, timestamp: Date.now() });
+      }
       return normalizedData;
     } catch (error: any) {
       if (error?.response?.data) {
         const errData = error.response.data;
+        const normalizedFarmer = errData.farmer_details ? normalizeFarmer(errData.farmer_details) : undefined;
         return {
           status: errData.status ?? 404,
           message: errData.message || 'No procurement records found',
-          farmer_details: errData.farmer_details ? normalizeFarmer(errData.farmer_details) : undefined,
+          farmer_details: normalizedFarmer,
           procurement_data: Array.isArray(errData.procurement_data) ? errData.procurement_data : [],
         };
       }

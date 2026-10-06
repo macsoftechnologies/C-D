@@ -84,6 +84,8 @@ export default function DailyProcurementScreen() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const [farmers, setFarmers] = useState<Farmer[]>([]);
   const [procurementItems, setProcurementItems] = useState<FarmerProcurementSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -100,6 +102,9 @@ export default function DailyProcurementScreen() {
   const [rateInput, setRateInput] = useState('35.00');
   const [savingProcurement, setSavingProcurement] = useState(false);
 
+  const loadedAnimalsFarmerIdRef = React.useRef<string>('');
+  const isLoadingRef = React.useRef(false);
+
   // 1. Load Session (supports both Super Admin and Sub Admin)
   useEffect(() => {
     async function loadAuth() {
@@ -107,7 +112,6 @@ export default function DailyProcurementScreen() {
       if (stored) {
         setSession(stored);
       } else {
-        // Fallback session if opened directly or from Super Admin
         const fallback: StoredUserData = {
           role: 'super_admin',
           role_id: '1',
@@ -131,35 +135,30 @@ export default function DailyProcurementScreen() {
     }
   }, [params.farmer_id, params.open_record]);
 
-  const isLoadingRef = React.useRef(false);
-
   // 2. Fetch All Procurement Data
   const loadData = useCallback(async (force = false) => {
     if (isLoadingRef.current) return;
 
     try {
       isLoadingRef.current = true;
-      setLoading(true);
+      if (procurementItems.length === 0) {
+        setLoading(true);
+      }
+      setError(false);
+      setErrorMessage('');
 
       const targetFarmerId = params.farmer_id ? String(params.farmer_id) : null;
 
       if (targetFarmerId) {
-        console.log('====================================');
-        console.log('[PROCUREMENT SCREEN] Loading details for targeted Farmer ID:', targetFarmerId);
-        console.log('====================================');
-
-        // Parallel fetch for target farmer: details, animals, and procurement list
-        const [farmerRes, animalsRes, procRes] = await Promise.allSettled([
-          getFarmerById(targetFarmerId),
+        // Parallel fetch for target farmer: animals and procurement list
+        // Notice: procurementbyfarmerid ALREADY returns complete farmer_details!
+        const [animalsRes, procRes] = await Promise.allSettled([
           getAnimalsByFarmerId(targetFarmerId, force),
           getProcurementByFarmerId(targetFarmerId, force),
         ]);
 
         let resolvedFarmer: Farmer | null = null;
-        if (farmerRes.status === 'fulfilled' && farmerRes.value) {
-          resolvedFarmer = farmerRes.value;
-          console.log('[PROCUREMENT SCREEN] Loaded farmer details:', resolvedFarmer.farmer_name);
-        } else if (procRes.status === 'fulfilled' && procRes.value?.farmer_details) {
+        if (procRes.status === 'fulfilled' && procRes.value?.farmer_details) {
           resolvedFarmer = procRes.value.farmer_details;
         }
 
@@ -181,7 +180,7 @@ export default function DailyProcurementScreen() {
         setSelectedFarmerId(targetFarmerId);
 
         if (animalsRes.status === 'fulfilled' && Array.isArray(animalsRes.value)) {
-          console.log('[PROCUREMENT SCREEN] Loaded animals count:', animalsRes.value.length);
+          loadedAnimalsFarmerIdRef.current = targetFarmerId;
           setFarmerAnimals(animalsRes.value);
           if (animalsRes.value.length > 0) {
             setSelectedAnimalId(String(animalsRes.value[0].animal_id));
@@ -198,8 +197,6 @@ export default function DailyProcurementScreen() {
 
         if (procRes.status === 'fulfilled' && procRes.value) {
           const rawProc = procRes.value;
-          console.log('[PROCUREMENT SCREEN] Procurement response status:', rawProc.status);
-
           const dataList: any[] = Array.isArray(rawProc.procurement_data)
             ? rawProc.procurement_data
             : Array.isArray((rawProc as any).data)
@@ -272,21 +269,23 @@ export default function DailyProcurementScreen() {
         setProcurementItems(items);
       } else {
         // Mode 2: General Admin Procurement View (when no specific farmer_id passed)
-        const adminIdToUse = session?.admin_id || params.admin_id || '1';
-        console.log('[PROCUREMENT SCREEN] Fetching general farmer list for admin_id:', adminIdToUse);
+        const adminIdToUse = session?.admin_id || params.admin_id;
+        if (!adminIdToUse) {
+          // Await session retrieval before issuing network request
+          return;
+        }
 
         const farmerList = await getFarmersByAdmin(adminIdToUse, force);
         setFarmers(farmerList);
 
         const items: FarmerProcurementSummary[] = [];
 
-        const settledResults = await batchAllSettled(
-          farmerList,
-          async (farmer) => {
+        // Concurrently fetch all assigned farmers' procurements
+        const settledResults = await Promise.allSettled(
+          farmerList.map(async (farmer) => {
             const res = await getProcurementByFarmerId(farmer.farmer_id, force);
             return { farmer, res };
-          },
-          6
+          })
         );
 
         for (const itemResult of settledResults) {
@@ -338,13 +337,19 @@ export default function DailyProcurementScreen() {
         items.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
         setProcurementItems(items);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.log('[PROCUREMENT SCREEN ERROR]:', err);
+      if (procurementItems.length === 0) {
+        setError(true);
+        setErrorMessage(
+          err?.response?.data?.message || err?.message || 'Unable to retrieve milk procurement records.'
+        );
+      }
     } finally {
       isLoadingRef.current = false;
       setLoading(false);
     }
-  }, [session?.admin_id, params.farmer_id, params.farmer_name, params.code, params.admin_id, fatInput, snfInput]);
+  }, [session?.admin_id, params.farmer_id, params.farmer_name, params.code, params.admin_id, procurementItems.length]);
 
   useFocusEffect(
     useCallback(() => {
@@ -358,14 +363,14 @@ export default function DailyProcurementScreen() {
     setRefreshing(false);
   };
 
-  // When farmer is selected in Add Procurement Modal, fetch their animals
+  // When farmer is selected in Add Procurement Modal, fetch their animals (deduplicated)
   useEffect(() => {
-    if (selectedFarmerId) {
+    if (selectedFarmerId && loadedAnimalsFarmerIdRef.current !== selectedFarmerId) {
+      loadedAnimalsFarmerIdRef.current = selectedFarmerId;
       getAnimalsByFarmerId(selectedFarmerId).then((animals) => {
         setFarmerAnimals(animals);
         if (animals.length > 0) {
           setSelectedAnimalId(animals[0].animal_id);
-          // auto update default rate
           const rate = calculateMilkRate(parseFloat(fatInput) || 4.5, parseFloat(snfInput) || 8.5, animals[0].animal_type);
           setRateInput(rate.toFixed(2));
         } else {
@@ -447,6 +452,30 @@ export default function DailyProcurementScreen() {
         (res as any).status === true;
 
       if (isSuccess) {
+        const newlyAdded: FarmerProcurementSummary = {
+          farmerId: String(selectedFarmerId),
+          farmerName:
+            farmers.find((f) => String(f.farmer_id) === String(selectedFarmerId))?.farmer_name ||
+            params.farmer_name ||
+            'Farmer',
+          farmerCode:
+            farmers.find((f) => String(f.farmer_id) === String(selectedFarmerId))?.code ||
+            params.code ||
+            `F-${selectedFarmerId}`,
+          date: new Date().toISOString().split('T')[0],
+          morningQty: selectedShift === 'Morning' ? Number(liters.toFixed(2)) : 0,
+          eveningQty: selectedShift === 'Evening' ? Number(liters.toFixed(2)) : 0,
+          totalQty: Number(liters.toFixed(2)),
+          fat: fat.toFixed(2),
+          snf: snf.toFixed(2),
+          rate: rate.toFixed(2),
+          totalAmount: (liters * rate).toFixed(2),
+          procurementId: String((res as any)?.procurement_id || Date.now()),
+        };
+
+        setProcurementItems((prev) => [newlyAdded, ...prev]);
+        setLitersInput('');
+
         Alert.alert(
           'Success',
           res.message || 'Milk procurement recorded successfully!',
@@ -472,8 +501,6 @@ export default function DailyProcurementScreen() {
             },
           ]
         );
-
-        setLitersInput('');
       } else {
         Alert.alert('Failed', res.message || 'Unable to record daily procurement.');
       }
@@ -591,6 +618,19 @@ export default function DailyProcurementScreen() {
       {/* Content List */}
       {loading && procurementItems.length === 0 ? (
         <DailyProcurementSkeleton />
+      ) : error && procurementItems.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Ionicons name="alert-circle-outline" size={48} color={COLORS.danger} />
+          <Text style={[styles.emptyTitle, { color: COLORS.danger }]}>Failed to Load Records</Text>
+          <Text style={styles.emptySubtitle}>{errorMessage || 'Unable to retrieve milk procurement records. Please try again.'}</Text>
+          <TouchableOpacity
+            style={[styles.recordFirstBtn, { backgroundColor: COLORS.headline }]}
+            onPress={() => loadData(true)}
+          >
+            <Ionicons name="refresh-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.recordFirstBtnText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
       ) : filteredList.length === 0 ? (
         <View style={styles.emptyBox}>
           <MaterialCommunityIcons name="water-outline" size={48} color={COLORS.labelText} />
@@ -617,6 +657,10 @@ export default function DailyProcurementScreen() {
           keyExtractor={(item, idx) => `${item.farmerId}_${item.date}_${idx}`}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          initialNumToRender={8}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS === 'android'}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

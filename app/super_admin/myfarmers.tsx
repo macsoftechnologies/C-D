@@ -10,6 +10,7 @@ import {
   RefreshControl,
   useWindowDimensions,
   StatusBar,
+  Platform,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -61,11 +62,23 @@ export default function MyFarmers() {
   const [errorMessage, setErrorMessage] = useState('');
   const [failedFarmerImages, setFailedFarmerImages] = useState<Record<string, boolean>>({});
 
+  const lastFetchTimeRef = React.useRef(0);
+  const isFetchingRef = React.useRef(false);
+
   /**
    * Fetch farmers assigned to admin/sub-admin with caching and parallel fetch.
    */
   const fetchFarmersByAdmin = useCallback(async (force = false) => {
+    if (isFetchingRef.current) return;
+
+    const now = Date.now();
+    if (!force && farmers.length > 0 && now - lastFetchTimeRef.current < 45000) {
+      setLoading(false);
+      return;
+    }
+
     try {
+      isFetchingRef.current = true;
       setError(false);
       setErrorMessage('');
 
@@ -78,6 +91,7 @@ export default function MyFarmers() {
       }
 
       setFarmers(farmerData);
+      lastFetchTimeRef.current = Date.now();
       setError(false);
       setErrorMessage('');
     } catch (error: any) {
@@ -98,9 +112,10 @@ export default function MyFarmers() {
         });
       }
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
-  }, [adminId]);
+  }, [adminId, farmers.length]);
 
   useFocusEffect(
     useCallback(() => {
@@ -549,6 +564,10 @@ export default function MyFarmers() {
         }
         renderItem={renderItem}
         showsVerticalScrollIndicator={false}
+        initialNumToRender={8}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS === 'android'}
         contentContainerStyle={[
           styles.listContent,
           {

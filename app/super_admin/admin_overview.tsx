@@ -9,12 +9,19 @@ import {
   ScrollView,
   Image,
   Alert,
+  Modal,
+  TextInput,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { getSubadminById, deleteSubadmin, SubadminItem } from '@/src/services/dairyApi';
+import {
+  getSubadminById,
+  deleteSubadmin,
+  addSubadminBankDetails,
+  SubadminItem,
+} from '@/src/services/dairyApi';
 import { AdminOverviewSkeleton } from '@/components/Shimmer';
 
 interface AdminDetails extends SubadminItem {
@@ -90,6 +97,77 @@ export default function AdminOverview() {
   }, [admin_id]);
 
   const [deleting, setDeleting] = useState(false);
+
+  // Bank Details state
+  const [bankModalVisible, setBankModalVisible] = useState(false);
+  const [bankBranch, setBankBranch] = useState('');
+  const [bankAccountHolder, setBankAccountHolder] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankIfsc, setBankIfsc] = useState('');
+  const [savingBank, setSavingBank] = useState(false);
+
+  useEffect(() => {
+    if (adminDetails) {
+      setBankBranch(adminDetails.branch_name || '');
+      setBankAccountHolder(adminDetails.account_holder_name || '');
+      setBankAccountNumber(adminDetails.account_number || '');
+      setBankIfsc(adminDetails.ifsc_code || '');
+    }
+  }, [adminDetails]);
+
+  const handleSaveBankDetails = async () => {
+    if (!admin_id) return;
+    if (!bankAccountHolder.trim()) {
+      Alert.alert('Validation', 'Please enter account holder name.');
+      return;
+    }
+    if (!bankAccountNumber.trim()) {
+      Alert.alert('Validation', 'Please enter account number.');
+      return;
+    }
+    if (!bankIfsc.trim()) {
+      Alert.alert('Validation', 'Please enter IFSC code.');
+      return;
+    }
+    if (!bankBranch.trim()) {
+      Alert.alert('Validation', 'Please enter branch name.');
+      return;
+    }
+
+    try {
+      setSavingBank(true);
+      const res = await addSubadminBankDetails({
+        admin_id: admin_id,
+        branch_name: bankBranch.trim(),
+        account_holder_name: bankAccountHolder.trim(),
+        account_number: bankAccountNumber.trim(),
+        ifsc_code: bankIfsc.trim().toUpperCase(),
+      });
+
+      const isOk =
+        res?.status === 200 ||
+        (res?.status as any) === '200' ||
+        (res?.status as any) === true;
+
+      if (isOk) {
+        Alert.alert('Success', res?.message || 'Bank Details Successfully Added.', [
+          {
+            text: 'OK',
+            onPress: () => {
+              setBankModalVisible(false);
+              fetchAdminDetails(true);
+            },
+          },
+        ]);
+      } else {
+        Alert.alert('Failed', res?.message || 'Could not update bank details.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Network error while updating bank details.');
+    } finally {
+      setSavingBank(false);
+    }
+  };
 
   const handleBack = () => {
     router.back();
@@ -514,6 +592,84 @@ export default function AdminOverview() {
           </View>
         </View>
 
+        {/* Bank & Settlement Details Card */}
+        <View style={styles.detailsCard}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <MaterialCommunityIcons name="bank" size={20} color="#1F5E4A" />
+              <Text style={styles.sectionTitle}>Bank & Settlement Details</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.bankEditBtn}
+              activeOpacity={0.8}
+              onPress={() => setBankModalVisible(true)}
+            >
+              <Ionicons name="create-outline" size={15} color="#1F5E4A" />
+              <Text style={styles.bankEditBtnText}>
+                {adminDetails.account_number ? 'Edit' : 'Add'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Account Holder */}
+          <View style={styles.detailRow}>
+            <View style={styles.detailIcon}>
+              <Ionicons name="person-outline" size={20} color="#4CAF50" />
+            </View>
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>Account Holder Name</Text>
+              <Text style={styles.detailValue}>
+                {adminDetails.account_holder_name || 'Not Added'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          {/* Account Number */}
+          <View style={styles.detailRow}>
+            <View style={styles.detailIcon}>
+              <Ionicons name="card-outline" size={20} color="#4CAF50" />
+            </View>
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>Account Number</Text>
+              <Text style={[styles.detailValue, { letterSpacing: 1 }]}>
+                {adminDetails.account_number || 'Not Added'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          {/* IFSC Code */}
+          <View style={styles.detailRow}>
+            <View style={styles.detailIcon}>
+              <Ionicons name="barcode-outline" size={20} color="#4CAF50" />
+            </View>
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>IFSC Code</Text>
+              <Text style={[styles.detailValue, { textTransform: 'uppercase' }]}>
+                {adminDetails.ifsc_code || 'Not Added'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          {/* Branch */}
+          <View style={styles.detailRow}>
+            <View style={styles.detailIcon}>
+              <Ionicons name="business-outline" size={20} color="#4CAF50" />
+            </View>
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>Branch Name</Text>
+              <Text style={styles.detailValue}>
+                {adminDetails.branch_name || 'Not Added'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
         {/* Update Button */}
         <TouchableOpacity
           style={styles.updateButton}
@@ -581,6 +737,109 @@ export default function AdminOverview() {
         {/* Bottom spacing */}
         <View style={{ height: 25 }} />
       </ScrollView>
+
+      {/* Bank Details Modal */}
+      <Modal
+        visible={bankModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !savingBank && setBankModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <MaterialCommunityIcons name="bank" size={20} color="#1F5E4A" />
+                <Text style={styles.modalTitle}>
+                  {adminDetails.account_number ? 'Update Bank Details' : 'Add Bank Details'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => !savingBank && setBankModalVisible(false)}
+                disabled={savingBank}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              Update official settlement bank account for this Sub Administrator.
+            </Text>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Account Holder Name</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={bankAccountHolder}
+                onChangeText={setBankAccountHolder}
+                placeholder="e.g. John Doe"
+                placeholderTextColor="#999"
+                editable={!savingBank}
+              />
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Account Number</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={bankAccountNumber}
+                onChangeText={setBankAccountNumber}
+                placeholder="e.g. 0009998788"
+                placeholderTextColor="#999"
+                keyboardType="numeric"
+                editable={!savingBank}
+              />
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>IFSC Code</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={bankIfsc}
+                onChangeText={(t) => setBankIfsc(t.toUpperCase())}
+                placeholder="e.g. UBIN0980"
+                placeholderTextColor="#999"
+                autoCapitalize="characters"
+                editable={!savingBank}
+              />
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Branch Name</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={bankBranch}
+                onChangeText={setBankBranch}
+                placeholder="e.g. Kirlampudi"
+                placeholderTextColor="#999"
+                editable={!savingBank}
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setBankModalVisible(false)}
+                disabled={savingBank}
+              >
+                <Text style={styles.modalCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalSubmitBtn, savingBank && styles.btnDisabled]}
+                onPress={handleSaveBankDetails}
+                disabled={savingBank}
+              >
+                {savingBank ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.modalSubmitBtnText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -918,5 +1177,106 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     color: '#161616',
+  },
+  bankEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#E8F5E9',
+  },
+  bankEditBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1F5E4A',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#161616',
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 16,
+    lineHeight: 18,
+  },
+  modalInputGroup: {
+    marginBottom: 12,
+  },
+  modalLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#444',
+    marginBottom: 6,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#161616',
+    backgroundColor: '#FAFAFA',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 16,
+  },
+  modalCancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#eee',
+  },
+  modalCancelBtnText: {
+    color: '#555',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  modalSubmitBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#4CAF50',
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  modalSubmitBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  btnDisabled: {
+    opacity: 0.6,
   },
 });

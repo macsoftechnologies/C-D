@@ -32,6 +32,7 @@ import {
   calculateTotalMilk,
   calculateTotalAmount,
   DailyProcurementDateGroup,
+  addFarmerBankDetails,
 } from '@/src/services/dairyApi';
 import { FarmerOverviewSkeleton, ShimmerBlock } from '@/components/Shimmer';
 
@@ -51,6 +52,10 @@ interface Farmer {
   updated_at: string;
   admin_id: string;
   code: string;
+  branch_name?: string;
+  account_number?: string;
+  ifsc_code?: string;
+  account_holder_name?: string;
 }
 
 export interface AnimalItem {
@@ -190,10 +195,78 @@ export default function SuperAdminFarmerOverview() {
   const [procRate, setProcRate] = useState('35.00');
   const [savingProcurement, setSavingProcurement] = useState(false);
 
+  // Bank Details State
+  const [bankModalVisible, setBankModalVisible] = useState(false);
+  const [bankBranch, setBankBranch] = useState('');
+  const [bankAccountHolder, setBankAccountHolder] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankIfsc, setBankIfsc] = useState('');
+  const [savingBank, setSavingBank] = useState(false);
+
   const farmerRef = useRef<Farmer | null>(null);
   useEffect(() => {
     farmerRef.current = farmer;
+    if (farmer) {
+      setBankBranch(farmer.branch_name || '');
+      setBankAccountHolder(farmer.account_holder_name || '');
+      setBankAccountNumber(farmer.account_number || '');
+      setBankIfsc(farmer.ifsc_code || '');
+    }
   }, [farmer]);
+
+  const handleSaveBankDetails = async () => {
+    if (!farmer_id) return;
+    if (!bankAccountHolder.trim()) {
+      Alert.alert('Validation Error', 'Please enter account holder name.');
+      return;
+    }
+    if (!bankAccountNumber.trim()) {
+      Alert.alert('Validation Error', 'Please enter account number.');
+      return;
+    }
+    if (!bankIfsc.trim()) {
+      Alert.alert('Validation Error', 'Please enter IFSC code.');
+      return;
+    }
+    if (!bankBranch.trim()) {
+      Alert.alert('Validation Error', 'Please enter branch name.');
+      return;
+    }
+
+    try {
+      setSavingBank(true);
+      const res = await addFarmerBankDetails({
+        farmer_id: farmer_id,
+        branch_name: bankBranch.trim(),
+        account_holder_name: bankAccountHolder.trim(),
+        account_number: bankAccountNumber.trim(),
+        ifsc_code: bankIfsc.trim().toUpperCase(),
+      });
+
+      const isOk =
+        res?.status === 200 ||
+        (res?.status as any) === '200' ||
+        (res?.status as any) === true;
+
+      if (isOk) {
+        Alert.alert('Success', res?.message || 'Bank Details Successfully Added.', [
+          {
+            text: 'OK',
+            onPress: () => {
+              setBankModalVisible(false);
+              loadOverviewData(String(farmer_id), true);
+            },
+          },
+        ]);
+      } else {
+        Alert.alert('Failed', res?.message || 'Could not update bank details.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Network error while updating bank details.');
+    } finally {
+      setSavingBank(false);
+    }
+  };
 
   const lastLoadedFarmerIdRef = useRef<string | null>(null);
   const isLoadingOverviewRef = useRef<boolean>(false);
@@ -256,9 +329,9 @@ export default function SuperAdminFarmerOverview() {
 
       try {
         const [farmerRes, animalsRes, procRes] = await Promise.allSettled([
-          getFarmerById(targetId),
+          getFarmerById(targetId, force),
           getAnimalsByFarmerId(targetId, force),
-          getProcurementByFarmerId(targetId),
+          getProcurementByFarmerId(targetId, force),
         ]);
 
         if (farmerRes.status === 'fulfilled' && farmerRes.value) {
@@ -405,7 +478,7 @@ export default function SuperAdminFarmerOverview() {
   useFocusEffect(
     useCallback(() => {
       if (farmer_id && lastLoadedFarmerIdRef.current !== String(farmer_id)) {
-        loadOverviewData(String(farmer_id), true);
+        loadOverviewData(String(farmer_id), false);
       }
     }, [farmer_id, loadOverviewData])
   );
@@ -953,6 +1026,54 @@ export default function SuperAdminFarmerOverview() {
             icon="time-outline"
             label="Last Updated"
             value={formatDate(farmer.updated_at)}
+            isLast
+          />
+        </View>
+
+        {/* ==================================================== */}
+        {/* BANK ACCOUNT DETAILS SECTION                         */}
+        {/* ==================================================== */}
+        <View style={styles.sectionCard}>
+          <View style={styles.animalsHeaderRow}>
+            <View>
+              <View style={styles.titleWithIcon}>
+                <MaterialCommunityIcons name="bank" size={20} color={COLORS.brandGreen} />
+                <Text style={styles.sectionTitle}>Bank Account Details</Text>
+              </View>
+              <Text style={styles.animalsSubhead}>Official settlement account</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.addAnimalBtn}
+              activeOpacity={0.85}
+              onPress={() => setBankModalVisible(true)}
+            >
+              <Ionicons name="create-outline" size={15} color="#FFFFFF" />
+              <Text style={styles.addAnimalBtnText}>
+                {farmer.account_number ? 'Edit Bank' : 'Add Bank'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <DetailItem
+            icon="person-outline"
+            label="Account Holder Name"
+            value={farmer.account_holder_name}
+          />
+          <DetailItem
+            icon="card-outline"
+            label="Account Number"
+            value={farmer.account_number}
+          />
+          <DetailItem
+            icon="barcode-outline"
+            label="IFSC Code"
+            value={farmer.ifsc_code ? farmer.ifsc_code.toUpperCase() : undefined}
+          />
+          <DetailItem
+            icon="business-outline"
+            label="Branch Name"
+            value={farmer.branch_name}
             isLast
           />
         </View>
@@ -1818,6 +1939,112 @@ export default function SuperAdminFarmerOverview() {
             />
           ) : null}
         </View>
+      </Modal>
+
+      {/* ==================================================== */}
+      {/* MODAL: ADD / EDIT BANK DETAILS                       */}
+      {/* ==================================================== */}
+      <Modal
+        visible={bankModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => !savingBank && setBankModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <MaterialCommunityIcons name="bank" size={20} color={COLORS.brandGreen} />
+                <Text style={styles.modalTitle}>
+                  {farmer.account_number ? 'Update Bank Details' : 'Add Bank Details'}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => !savingBank && setBankModalVisible(false)}
+                style={styles.modalCloseBtn}
+                disabled={savingBank}
+              >
+                <Ionicons name="close" size={20} color={COLORS.textDark} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalSubtitle}>
+                Bank settlement account for farmer #{farmer_id} ({farmer.farmer_name}).
+              </Text>
+
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.inputLabel}>Account Holder Name *</Text>
+                <TextInput
+                  style={styles.customTypeInput}
+                  value={bankAccountHolder}
+                  onChangeText={setBankAccountHolder}
+                  placeholder="e.g. Varsha"
+                  placeholderTextColor="#999"
+                  editable={!savingBank}
+                />
+              </View>
+
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.inputLabel}>Account Number *</Text>
+                <TextInput
+                  style={styles.customTypeInput}
+                  value={bankAccountNumber}
+                  onChangeText={setBankAccountNumber}
+                  placeholder="e.g. 123456789012"
+                  placeholderTextColor="#999"
+                  keyboardType="numeric"
+                  editable={!savingBank}
+                />
+              </View>
+
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.inputLabel}>IFSC Code *</Text>
+                <TextInput
+                  style={styles.customTypeInput}
+                  value={bankIfsc}
+                  onChangeText={(t) => setBankIfsc(t.toUpperCase())}
+                  placeholder="e.g. SBIN0001234"
+                  placeholderTextColor="#999"
+                  autoCapitalize="characters"
+                  editable={!savingBank}
+                />
+              </View>
+
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.inputLabel}>Branch Name *</Text>
+                <TextInput
+                  style={styles.customTypeInput}
+                  value={bankBranch}
+                  onChangeText={setBankBranch}
+                  placeholder="e.g. Visakhapatnam Main"
+                  placeholderTextColor="#999"
+                  editable={!savingBank}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.modalSubmitBtn, savingBank && { opacity: 0.7 }]}
+                activeOpacity={0.85}
+                onPress={handleSaveBankDetails}
+                disabled={savingBank}
+              >
+                {savingBank ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                    <Text style={styles.modalSubmitBtnText}>Save Bank Details</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

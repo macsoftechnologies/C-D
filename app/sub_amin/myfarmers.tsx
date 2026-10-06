@@ -14,6 +14,7 @@ import {
   Linking,
   Alert,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -22,6 +23,7 @@ import {
   getFarmersByAdmin,
   getAllFarmers,
   getAllSubadmins,
+  getSubadminById,
   Farmer,
   SubadminItem,
 } from '@/src/services/dairyApi';
@@ -47,6 +49,8 @@ export default function SubAdminMyFarmers() {
   const [adminId, setAdminId] = useState<string>(params.admin_id || '');
   const [farmers, setFarmers] = useState<Farmer[]>([]);
   const [subadmins, setSubadmins] = useState<SubadminItem[]>([]);
+  const [subadminTotals, setSubadminTotals] = useState<SubadminItem | null>(null);
+  const [totalsLoading, setTotalsLoading] = useState(false);
   const [selectedBoothId, setSelectedBoothId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -54,6 +58,9 @@ export default function SubAdminMyFarmers() {
   const [error, setError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [failedFarmerImages, setFailedFarmerImages] = useState<Record<string, boolean>>({});
+
+  const lastFetchTimeRef = React.useRef(0);
+  const isFetchingRef = React.useRef(false);
 
   // Resolve adminId on mount if not in params
   useEffect(() => {
@@ -74,18 +81,62 @@ export default function SubAdminMyFarmers() {
 
   const fetchFarmers = useCallback(
     async (forceRefresh = false) => {
+      if (isFetchingRef.current) return;
+
+      const now = Date.now();
+      // Skip redundant refetch on rapid focus if data exists and is fresh within 45s
+      if (!forceRefresh && farmers.length > 0 && now - lastFetchTimeRef.current < 45000) {
+        setLoading(false);
+        return;
+      }
+
       try {
+        isFetchingRef.current = true;
         setError(false);
         setErrorMessage('');
 
-        // Fetch complete farmer list across all booths/subadmins exactly matching Super Admin
-        const [farmerData, boothList] = await Promise.all([
-          getAllFarmers(forceRefresh),
-          getAllSubadmins(forceRefresh),
-        ]);
+        const targetAdminId = adminId || (await getUserSession())?.admin_id;
 
-        setFarmers(farmerData);
-        setSubadmins(boothList);
+        if (targetAdminId) {
+          setTotalsLoading(true);
+          // Priority 1: Fast direct fetch for this Sub-Admin's farmers (~200ms) and live API totals
+          const directPromise = getFarmersByAdmin(targetAdminId, forceRefresh);
+          const subadminsPromise = getAllSubadmins(forceRefresh);
+          const totalsPromise = getSubadminById(targetAdminId, forceRefresh);
+
+          const [directFarmers, boothList, totalsData] = await Promise.all([
+            directPromise,
+            subadminsPromise,
+            totalsPromise,
+          ]);
+          setFarmers(directFarmers);
+          setSubadmins(boothList);
+          if (totalsData) setSubadminTotals(totalsData);
+          setTotalsLoading(false);
+          setLoading(false);
+          lastFetchTimeRef.current = Date.now();
+
+          // Priority 2: In the background, load complete list if there are multiple booths for filtering
+          if (boothList.length > 1) {
+            getAllFarmers(forceRefresh)
+              .then((allData) => {
+                if (allData.length > 0) {
+                  setFarmers(allData);
+                }
+              })
+              .catch(() => { });
+          }
+        } else {
+          // General mode without adminId: load all concurrently
+          const [farmerData, boothList] = await Promise.all([
+            getAllFarmers(forceRefresh),
+            getAllSubadmins(forceRefresh),
+          ]);
+
+          setFarmers(farmerData);
+          setSubadmins(boothList);
+          lastFetchTimeRef.current = Date.now();
+        }
       } catch (err: any) {
         console.log('Error fetching sub-admin farmers:', err);
         if (adminId) {
@@ -93,24 +144,27 @@ export default function SubAdminMyFarmers() {
             const fallback = await getFarmersByAdmin(adminId, forceRefresh);
             setFarmers(fallback);
           } catch {
-            setError(true);
-            setErrorMessage(
-              err?.response?.data?.message ||
+            if (farmers.length === 0) {
+              setError(true);
+              setErrorMessage(
+                err?.response?.data?.message ||
                 'Unable to retrieve farmers. Please check your network.'
-            );
+              );
+            }
           }
-        } else {
+        } else if (farmers.length === 0) {
           setError(true);
           setErrorMessage(
             err?.response?.data?.message ||
-              'Unable to retrieve farmers. Please check your network.'
+            'Unable to retrieve farmers. Please check your network.'
           );
         }
       } finally {
+        isFetchingRef.current = false;
         setLoading(false);
       }
     },
-    [adminId]
+    [adminId, farmers.length]
   );
 
   useFocusEffect(
@@ -133,8 +187,26 @@ export default function SubAdminMyFarmers() {
     });
   };
 
+  // Map farmer totals from subadmin API response (/subadminbyid)
+  const farmerTotalsMap = useMemo(() => {
+    const map = new Map<string, { total_liters: number; total_amount: number; total_procurements: number }>();
+    if (Array.isArray(subadminTotals?.farmers)) {
+      for (const f of subadminTotals.farmers) {
+        if (f.farmer_id) {
+          map.set(String(f.farmer_id), {
+            total_liters: typeof f.total_liters === 'number' ? f.total_liters : parseFloat(f.total_liters) || 0,
+            total_amount: typeof f.total_amount === 'number' ? f.total_amount : parseFloat(f.total_amount) || 0,
+            total_procurements: typeof f.total_procurements === 'number' ? f.total_procurements : parseInt(f.total_procurements, 10) || 0,
+          });
+        }
+      }
+    }
+    return map;
+  }, [subadminTotals]);
+
   const handleView = (item: Farmer) => {
     if (!item.farmer_id) return;
+    const fTotals = farmerTotalsMap.get(String(item.farmer_id));
     router.push({
       pathname: '/sub_amin/farmer_overview',
       params: {
@@ -148,6 +220,9 @@ export default function SubAdminMyFarmers() {
         status: String(item.status ?? '1'),
         profile: item.profile || '',
         created_at: item.created_at || '',
+        total_liters: fTotals?.total_liters !== undefined ? String(fTotals.total_liters) : undefined,
+        total_amount: fTotals?.total_amount !== undefined ? String(fTotals.total_amount) : undefined,
+        total_procurements: fTotals?.total_procurements !== undefined ? String(fTotals.total_procurements) : undefined,
       },
     });
   };
@@ -374,6 +449,30 @@ export default function SubAdminMyFarmers() {
           </View>
         </View>
 
+        {/* Live Procurement Totals snippet from API */}
+        {farmerTotalsMap.has(String(item.farmer_id)) ? (
+          <View style={styles.cardTotalsRow}>
+            <View style={styles.cardTotalItem}>
+              <Text style={styles.cardTotalLabel}>Total Milk</Text>
+              <Text style={styles.cardTotalVal}>
+                {farmerTotalsMap.get(String(item.farmer_id))!.total_liters.toFixed(1)} L
+              </Text>
+            </View>
+            <View style={styles.cardTotalItem}>
+              <Text style={styles.cardTotalLabel}>Total Paid</Text>
+              <Text style={[styles.cardTotalVal, { color: '#2E7D32' }]}>
+                ₹{farmerTotalsMap.get(String(item.farmer_id))!.total_amount.toFixed(2)}
+              </Text>
+            </View>
+            <View style={styles.cardTotalItem}>
+              <Text style={styles.cardTotalLabel}>Entries</Text>
+              <Text style={styles.cardTotalVal}>
+                {farmerTotalsMap.get(String(item.farmer_id))!.total_procurements}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
         {/* Actions Row: Record Milk & View More */}
         <View style={styles.actionsRow}>
           <TouchableOpacity
@@ -402,6 +501,57 @@ export default function SubAdminMyFarmers() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#161616" />
       {renderHeader()}
+
+      {/* Sub-Admin Live Collection & Revenue Totals Summary */}
+      <View style={styles.summaryBar}>
+        <View style={styles.summaryHeaderRow}>
+          <View style={styles.summaryTitleWithIcon}>
+            <MaterialCommunityIcons name="chart-box-outline" size={16} color="#4CAF50" />
+            <Text style={styles.summaryBarTitle}>Collection & Revenue Totals</Text>
+          </View>
+          {totalsLoading ? (
+            <ActivityIndicator size="small" color="#4CAF50" />
+          ) : (
+            <Text style={styles.summaryLiveBadge}>LIVE API</Text>
+          )}
+        </View>
+
+        <View style={styles.summaryGrid}>
+          <View style={styles.summaryGridItem}>
+            <Text style={styles.summaryItemLabel}>Total Milk</Text>
+            <Text style={styles.summaryItemValue}>
+              {subadminTotals?.total_liters !== undefined
+                ? `${Number(subadminTotals.total_liters).toFixed(1)} L`
+                : '0.0 L'}
+            </Text>
+          </View>
+
+          <View style={styles.summaryGridItem}>
+            <Text style={styles.summaryItemLabel}>Total Paid</Text>
+            <Text style={[styles.summaryItemValue, { color: '#2E7D32' }]}>
+              ₹{subadminTotals?.total_amount !== undefined
+                ? Number(subadminTotals.total_amount).toFixed(2)
+                : '0.00'}
+            </Text>
+          </View>
+
+          <View style={styles.summaryGridItem}>
+            <Text style={styles.summaryItemLabel}>Collections</Text>
+            <Text style={styles.summaryItemValue}>
+              {subadminTotals?.total_procurements ?? 0}
+            </Text>
+          </View>
+
+          <View style={styles.summaryGridItem}>
+            <Text style={styles.summaryItemLabel}>Today's Milk</Text>
+            <Text style={[styles.summaryItemValue, { color: '#4CAF50' }]}>
+              {subadminTotals?.today_liters !== undefined
+                ? `${Number(subadminTotals.today_liters).toFixed(1)} L`
+                : '0.0 L'}
+            </Text>
+          </View>
+        </View>
+      </View>
 
       {/* Search Bar */}
       <View style={styles.searchBox}>
@@ -499,6 +649,10 @@ export default function SubAdminMyFarmers() {
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          initialNumToRender={8}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS === 'android'}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -896,5 +1050,96 @@ const styles = StyleSheet.create({
   boothChipTextActive: {
     color: '#FFFFFF',
     fontWeight: '700',
+  },
+  summaryBar: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 4,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E6DF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  summaryHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    paddingBottom: 6,
+    borderBottomWidth: 0.8,
+    borderBottomColor: '#EEF0EC',
+  },
+  summaryTitleWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  summaryBarTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#161616',
+  },
+  summaryLiveBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#4CAF50',
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    letterSpacing: 0.5,
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  summaryGridItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  summaryItemLabel: {
+    fontSize: 11,
+    color: '#6B6B60',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  summaryItemValue: {
+    fontSize: 13.5,
+    fontWeight: '800',
+    color: '#161616',
+  },
+  cardTotalsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F6F2',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginTop: 6,
+    marginBottom: 10,
+    justifyContent: 'space-around',
+    borderWidth: 0.6,
+    borderColor: '#E2E8DE',
+  },
+  cardTotalItem: {
+    alignItems: 'center',
+  },
+  cardTotalLabel: {
+    fontSize: 10,
+    color: '#6B6B60',
+    fontWeight: '500',
+  },
+  cardTotalVal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#161616',
+    marginTop: 1,
   },
 });

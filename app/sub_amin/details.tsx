@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,9 +12,14 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { changePassword } from '@/src/services/dairyApi';
+import {
+  changePassword,
+  getSubadminById,
+  addSubadminBankDetails,
+  SubadminItem,
+} from '@/src/services/dairyApi';
 import { getUserSession } from '@/src/authStorage';
 
 export default function SubAdminDetailsScreen() {
@@ -41,6 +46,8 @@ export default function SubAdminDetailsScreen() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [resolvedAdminId, setResolvedAdminId] = useState(id);
+  const [subadmin, setSubadmin] = useState<SubadminItem | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
   // Change Password state
   const [changePwdVisible, setChangePwdVisible] = useState(false);
@@ -49,15 +56,47 @@ export default function SubAdminDetailsScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
 
+  // Bank Details state
+  const [bankModalVisible, setBankModalVisible] = useState(false);
+  const [bankBranch, setBankBranch] = useState('');
+  const [bankAccountHolder, setBankAccountHolder] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankIfsc, setBankIfsc] = useState('');
+  const [savingBank, setSavingBank] = useState(false);
+
+  // Fetch full Sub-Admin profile (including bank details)
+  const fetchSubadminProfile = useCallback(async (adminIdToFetch: string, force = false) => {
+    if (!adminIdToFetch) return;
+    try {
+      setLoadingDetails(true);
+      const data = await getSubadminById(adminIdToFetch, force);
+      if (data) {
+        setSubadmin(data);
+        setBankBranch(data.branch_name || '');
+        setBankAccountHolder(data.account_holder_name || '');
+        setBankAccountNumber(data.account_number || '');
+        setBankIfsc(data.ifsc_code || '');
+      }
+    } catch (err) {
+      console.log('Error fetching subadmin details:', err);
+    } finally {
+      setLoadingDetails(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!resolvedAdminId) {
+    let effectiveId = resolvedAdminId;
+    if (!effectiveId) {
       getUserSession().then((session) => {
         if (session?.admin_id) {
           setResolvedAdminId(session.admin_id);
+          fetchSubadminProfile(session.admin_id);
         }
       });
+    } else {
+      fetchSubadminProfile(effectiveId);
     }
-  }, [resolvedAdminId]);
+  }, [resolvedAdminId, fetchSubadminProfile]);
 
   const handleChangePasswordSubmit = async () => {
     if (!resolvedAdminId) {
@@ -104,7 +143,7 @@ export default function SubAdminDetailsScreen() {
       } else {
         Alert.alert(
           'Failed',
-          res?.message || res?.result || 'Failed to change password. Please verify current password.'
+          res?.result || res?.message || 'Failed to change password. Please verify current password.'
         );
       }
     } catch (err: any) {
@@ -114,19 +153,81 @@ export default function SubAdminDetailsScreen() {
     }
   };
 
+  const handleSaveBankDetails = async () => {
+    if (!resolvedAdminId) {
+      Alert.alert('Error', 'Sub Admin ID is missing.');
+      return;
+    }
+    if (!bankAccountHolder.trim()) {
+      Alert.alert('Validation', 'Please enter account holder name.');
+      return;
+    }
+    if (!bankAccountNumber.trim()) {
+      Alert.alert('Validation', 'Please enter account number.');
+      return;
+    }
+    if (!bankIfsc.trim()) {
+      Alert.alert('Validation', 'Please enter IFSC code.');
+      return;
+    }
+    if (!bankBranch.trim()) {
+      Alert.alert('Validation', 'Please enter branch name.');
+      return;
+    }
+
+    try {
+      setSavingBank(true);
+      const res = await addSubadminBankDetails({
+        admin_id: resolvedAdminId,
+        branch_name: bankBranch.trim(),
+        account_holder_name: bankAccountHolder.trim(),
+        account_number: bankAccountNumber.trim(),
+        ifsc_code: bankIfsc.trim().toUpperCase(),
+      });
+
+      const isOk =
+        res?.status === 200 ||
+        (res?.status as any) === '200' ||
+        (res?.status as any) === true;
+
+      if (isOk) {
+        Alert.alert('Success', res?.message || 'Bank Details Successfully Added.', [
+          {
+            text: 'OK',
+            onPress: () => {
+              setBankModalVisible(false);
+              fetchSubadminProfile(resolvedAdminId, true);
+            },
+          },
+        ]);
+      } else {
+        Alert.alert('Failed', res?.message || 'Could not update bank details.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Network error while updating bank details.');
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
   const details = [
-    { label: 'Name', value: name, icon: 'person-outline' as const },
-    { label: 'Booth', value: booth, icon: 'business-outline' as const },
-    { label: 'Location', value: location, icon: 'location-outline' as const },
-    { label: 'Address', value: address, icon: 'home-outline' as const },
-    { label: 'Phone Number', value: phone, icon: 'call-outline' as const },
+    { label: 'Name', value: subadmin?.admin_name || name, icon: 'person-outline' as const },
+    { label: 'Booth', value: booth || subadmin?.address || '-', icon: 'business-outline' as const },
+    { label: 'Location', value: location || subadmin?.address || '-', icon: 'location-outline' as const },
+    { label: 'Address', value: subadmin?.address || address, icon: 'home-outline' as const },
+    { label: 'Phone Number', value: subadmin?.mobile_number || phone, icon: 'call-outline' as const },
+    { label: 'Email', value: subadmin?.email || '-', icon: 'mail-outline' as const },
   ];
+
+  const hasBankDetails = Boolean(
+    subadmin?.account_number || subadmin?.ifsc_code || subadmin?.account_holder_name
+  );
 
   // Navigate to Milk Collection page, carrying the sub admin's id/name along
   const handleViewMilkCollection = () => {
     (router.push as any)({
       pathname: '/sub_amin/milk_collection',
-      params: { id, name },
+      params: { id: resolvedAdminId, name: subadmin?.admin_name || name },
     });
   };
 
@@ -134,7 +235,7 @@ export default function SubAdminDetailsScreen() {
   const handleViewMilkSlip = () => {
     router.push({
       pathname: '/sub_amin/slip_collection',
-      params: { id, name },
+      params: { id: resolvedAdminId, name: subadmin?.admin_name || name },
     });
   };
 
@@ -148,7 +249,7 @@ export default function SubAdminDetailsScreen() {
         </TouchableOpacity>
         <View style={styles.headerContent}>
           <Text style={styles.headerTitle}>Sub Admin Details</Text>
-          <Text style={styles.headerSubtitle}>Account Information</Text>
+          <Text style={styles.headerSubtitle}>Account & Settlement Information</Text>
         </View>
         <View style={{ width: 40 }} />
       </View>
@@ -164,6 +265,69 @@ export default function SubAdminDetailsScreen() {
           </View>
         ))}
 
+        {/* Bank Details Card */}
+        <View style={styles.bankCard}>
+          <View style={styles.bankCardHeader}>
+            <View style={styles.bankTitleRow}>
+              <MaterialCommunityIcons name="bank" size={20} color="#1F5E4A" />
+              <Text style={styles.bankCardTitle}>Bank & Settlement Details</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.bankEditBtn}
+              activeOpacity={0.8}
+              onPress={() => setBankModalVisible(true)}
+            >
+              <Ionicons name="create-outline" size={15} color="#1F5E4A" />
+              <Text style={styles.bankEditBtnText}>
+                {hasBankDetails ? 'Edit' : 'Add'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {loadingDetails ? (
+            <ActivityIndicator size="small" color="#4CAF50" style={{ paddingVertical: 12 }} />
+          ) : hasBankDetails ? (
+            <View style={styles.bankFieldsWrap}>
+              <View style={styles.bankFieldRow}>
+                <Text style={styles.bankFieldLabel}>Account Holder</Text>
+                <Text style={styles.bankFieldValue}>
+                  {subadmin?.account_holder_name || '-'}
+                </Text>
+              </View>
+              <View style={styles.bankFieldRow}>
+                <Text style={styles.bankFieldLabel}>Account Number</Text>
+                <Text style={[styles.bankFieldValue, { letterSpacing: 1 }]}>
+                  {subadmin?.account_number || '-'}
+                </Text>
+              </View>
+              <View style={styles.bankFieldRow}>
+                <Text style={styles.bankFieldLabel}>IFSC Code</Text>
+                <Text style={[styles.bankFieldValue, { textTransform: 'uppercase' }]}>
+                  {subadmin?.ifsc_code || '-'}
+                </Text>
+              </View>
+              <View style={styles.bankFieldRow}>
+                <Text style={styles.bankFieldLabel}>Branch</Text>
+                <Text style={styles.bankFieldValue}>
+                  {subadmin?.branch_name || '-'}
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.bankEmptyWrap}>
+              <Text style={styles.bankEmptyText}>No bank details added yet.</Text>
+              <TouchableOpacity
+                style={styles.bankAddFirstBtn}
+                activeOpacity={0.85}
+                onPress={() => setBankModalVisible(true)}
+              >
+                <Ionicons name="add-circle-outline" size={16} color="#FFFFFF" />
+                <Text style={styles.bankAddFirstBtnText}>Add Bank Details</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
         {/* Password row with show/hide toggle */}
         <View style={styles.detailRow}>
           <Ionicons name="lock-closed-outline" size={18} color="#4CAF50" />
@@ -171,7 +335,7 @@ export default function SubAdminDetailsScreen() {
             <Text style={styles.detailLabel}>Password</Text>
             <View style={styles.passwordRow}>
               <Text style={styles.detailValue}>
-                {showPassword ? password : '••••••••'}
+                {showPassword ? (password || '123456') : '••••••••'}
               </Text>
               <TouchableOpacity onPress={() => setShowPassword((prev) => !prev)}>
                 <Ionicons
@@ -207,6 +371,109 @@ export default function SubAdminDetailsScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Bank Details Modal */}
+      <Modal
+        visible={bankModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !savingBank && setBankModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <MaterialCommunityIcons name="bank" size={20} color="#1F5E4A" />
+                <Text style={styles.modalTitle}>
+                  {hasBankDetails ? 'Update Bank Details' : 'Add Bank Details'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => !savingBank && setBankModalVisible(false)}
+                disabled={savingBank}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              Bank details are used for official Canaan Dairy settlements.
+            </Text>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Account Holder Name</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={bankAccountHolder}
+                onChangeText={setBankAccountHolder}
+                placeholder="e.g. John Doe"
+                placeholderTextColor="#999"
+                editable={!savingBank}
+              />
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Account Number</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={bankAccountNumber}
+                onChangeText={setBankAccountNumber}
+                placeholder="e.g. 0009998788"
+                placeholderTextColor="#999"
+                keyboardType="numeric"
+                editable={!savingBank}
+              />
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>IFSC Code</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={bankIfsc}
+                onChangeText={(t) => setBankIfsc(t.toUpperCase())}
+                placeholder="e.g. UBIN0980"
+                placeholderTextColor="#999"
+                autoCapitalize="characters"
+                editable={!savingBank}
+              />
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Branch Name</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={bankBranch}
+                onChangeText={setBankBranch}
+                placeholder="e.g. Kirlampudi"
+                placeholderTextColor="#999"
+                editable={!savingBank}
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setBankModalVisible(false)}
+                disabled={savingBank}
+              >
+                <Text style={styles.modalCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalSubmitBtn, savingBank && styles.btnDisabled]}
+                onPress={handleSaveBankDetails}
+                disabled={savingBank}
+              >
+                {savingBank ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.modalSubmitBtnText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Change Password Modal */}
       <Modal
@@ -384,6 +651,90 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '700',
+  },
+  bankCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  bankCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  bankTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bankCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#161616',
+  },
+  bankEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#E8F5E9',
+  },
+  bankEditBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1F5E4A',
+  },
+  bankFieldsWrap: {
+    gap: 8,
+  },
+  bankFieldRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+  },
+  bankFieldLabel: {
+    fontSize: 12,
+    color: '#888',
+  },
+  bankFieldValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#161616',
+  },
+  bankEmptyWrap: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  bankEmptyText: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 10,
+  },
+  bankAddFirstBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#1F5E4A',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  bankAddFirstBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   changePasswordBtn: {
     flexDirection: 'row',

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Text,
-  
+
   StyleSheet,
   TouchableOpacity,
   FlatList,
@@ -26,7 +26,13 @@ import {
   clearUserSession,
   StoredUserData,
 } from '@/src/authStorage';
-import { getFarmersByAdmin, getAnimalsByFarmerId, batchAllSettled } from '@/src/services/dairyApi';
+import {
+  getFarmersByAdmin,
+  getAnimalsByFarmerId,
+  batchAllSettled,
+  getSubadminById,
+  SubadminItem,
+} from '@/src/services/dairyApi';
 import { FarmerCardSkeleton } from '@/components/Shimmer';
 
 const COLORS = {
@@ -113,6 +119,26 @@ export default function SubAdminDashboard() {
   const [selectedAnimal, setSelectedAnimal] = useState<DashboardAnimal | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
+  // Sub-Admin API Totals State (Direct from POST /api/subadminbyid)
+  const [subadminData, setSubadminData] = useState<SubadminItem | null>(null);
+  const [totalsLoading, setTotalsLoading] = useState(false);
+
+  // Fetch Sub-Admin Totals (Fast, cached, live from API)
+  const fetchSubadminTotals = useCallback(async (currentSession: StoredUserData, force = false) => {
+    if (!currentSession?.admin_id) return;
+    try {
+      setTotalsLoading(true);
+      const data = await getSubadminById(currentSession.admin_id, force);
+      if (data) {
+        setSubadminData(data);
+      }
+    } catch (err) {
+      console.log('Error fetching subadmin totals:', err);
+    } finally {
+      setTotalsLoading(false);
+    }
+  }, []);
+
   // 1. Verify Sub-Admin Session on Mount
   useEffect(() => {
     let isMounted = true;
@@ -137,6 +163,7 @@ export default function SubAdminDashboard() {
         }
 
         setSession(stored);
+        fetchSubadminTotals(stored, false);
       } catch (err) {
         console.log('Auth check error:', err);
         router.replace('/registration/login');
@@ -150,7 +177,7 @@ export default function SubAdminDashboard() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [fetchSubadminTotals]);
 
   // 2. Fetch Farmers for the logged-in Sub-Admin (fast & cached, does not block on animals)
   const fetchFarmers = useCallback(async (currentSession: StoredUserData, force = false) => {
@@ -200,13 +227,14 @@ export default function SubAdminDashboard() {
     }
   }, []);
 
-  // Auto-refresh farmers on focus without redundant heavy animal calls
+  // Auto-refresh farmers & subadmin totals on focus
   useFocusEffect(
     useCallback(() => {
       if (session) {
         fetchFarmers(session, false);
+        fetchSubadminTotals(session, false);
       }
-    }, [session, fetchFarmers])
+    }, [session, fetchFarmers, fetchSubadminTotals])
   );
 
   const animalsLoadedRef = React.useRef(false);
@@ -219,12 +247,15 @@ export default function SubAdminDashboard() {
     }
   }, [farmers, activeTab, fetchAnimalsLazily]);
 
-  // Pull to refresh handler
+  // Pull to refresh handler (refreshes farmers, animals & totals)
   const handleRefresh = async () => {
     if (!session) return;
     setRefreshing(true);
     animalsLoadedRef.current = false;
-    await fetchFarmers(session, true);
+    await Promise.all([
+      fetchFarmers(session, true),
+      fetchSubadminTotals(session, true),
+    ]);
     if (activeTab === 'animals' && farmers.length > 0) {
       await fetchAnimalsLazily(farmers, true);
     }
@@ -297,8 +328,26 @@ export default function SubAdminDashboard() {
     });
   };
 
-  // View Farmer Profile - passes all available data to eliminate loading latency on overview
+  // Map farmer totals from subadmin API response (/subadminbyid)
+  const farmerTotalsMap = useMemo(() => {
+    const map = new Map<string, { total_liters: number; total_amount: number; total_procurements: number }>();
+    if (Array.isArray(subadminData?.farmers)) {
+      for (const f of subadminData.farmers) {
+        if (f.farmer_id) {
+          map.set(String(f.farmer_id), {
+            total_liters: typeof f.total_liters === 'number' ? f.total_liters : parseFloat(f.total_liters) || 0,
+            total_amount: typeof f.total_amount === 'number' ? f.total_amount : parseFloat(f.total_amount) || 0,
+            total_procurements: typeof f.total_procurements === 'number' ? f.total_procurements : parseInt(f.total_procurements, 10) || 0,
+          });
+        }
+      }
+    }
+    return map;
+  }, [subadminData]);
+
+  // View Farmer Profile - passes all available data including live API totals to eliminate loading latency on overview
   const handleViewFarmer = (farmer: Farmer) => {
+    const fTotals = farmerTotalsMap.get(String(farmer.farmer_id));
     router.push({
       pathname: '/sub_amin/farmer_overview',
       params: {
@@ -312,6 +361,9 @@ export default function SubAdminDashboard() {
         status: String(farmer.status ?? '1'),
         profile: farmer.profile || '',
         created_at: farmer.created_at || '',
+        total_liters: fTotals?.total_liters !== undefined ? String(fTotals.total_liters) : undefined,
+        total_amount: fTotals?.total_amount !== undefined ? String(fTotals.total_amount) : undefined,
+        total_procurements: fTotals?.total_procurements !== undefined ? String(fTotals.total_procurements) : undefined,
       },
     });
   };
@@ -346,14 +398,30 @@ export default function SubAdminDashboard() {
           <Text style={styles.headerSubtitle}>Canaan Dairy Portal</Text>
         </View>
 
-        <TouchableOpacity
-          style={styles.logoutButton}
-          activeOpacity={0.8}
-          onPress={handleLogout}
-        >
-          <Ionicons name="log-out-outline" size={18} color="#FFFFFF" />
-          <Text style={styles.logoutButtonText}>Logout</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRightActions}>
+          <TouchableOpacity
+            style={styles.profileNavBtn}
+            activeOpacity={0.8}
+            onPress={() =>
+              router.push({
+                pathname: '/sub_amin/details' as any,
+                params: { id: session?.admin_id, name: session?.admin_name },
+              })
+            }
+          >
+            <Ionicons name="person-circle-outline" size={17} color="#FFFFFF" />
+            <Text style={styles.profileNavBtnText}>Profile</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.logoutButton}
+            activeOpacity={0.8}
+            onPress={handleLogout}
+          >
+            <Ionicons name="log-out-outline" size={16} color="#FFFFFF" />
+            <Text style={styles.logoutButtonText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Metrics Highlights Bar */}
@@ -380,6 +448,57 @@ export default function SubAdminDashboard() {
           </View>
           <Text style={styles.metricValue}>{totalCows}C / {totalBuffaloes}B</Text>
           <Text style={styles.metricLabel}>Cow / Buffalo</Text>
+        </View>
+      </View>
+
+      {/* Milk Procurement & Revenue Totals Bar (Direct from API: /subadminbyid) */}
+      <View style={styles.procurementTotalsBar}>
+        <View style={styles.totalsHeaderRow}>
+          <View style={styles.totalsTitleWithIcon}>
+            <MaterialCommunityIcons name="chart-box-outline" size={16} color={COLORS.brandGreen} />
+            <Text style={styles.totalsBarTitle}>Milk Collection & Revenue Totals</Text>
+          </View>
+          {totalsLoading ? (
+            <ActivityIndicator size="small" color={COLORS.brandGreen} />
+          ) : (
+            <Text style={styles.totalsLiveBadge}>LIVE API</Text>
+          )}
+        </View>
+
+        <View style={styles.totalsGrid}>
+          <View style={styles.totalGridItem}>
+            <Text style={styles.totalItemLabel}>Total Milk</Text>
+            <Text style={styles.totalItemValue}>
+              {subadminData?.total_liters !== undefined
+                ? `${Number(subadminData.total_liters).toFixed(1)} L`
+                : '0.0 L'}
+            </Text>
+          </View>
+
+          <View style={styles.totalGridItem}>
+            <Text style={styles.totalItemLabel}>Total Paid</Text>
+            <Text style={[styles.totalItemValue, { color: '#2E7D32' }]}>
+              ₹{subadminData?.total_amount !== undefined
+                ? Number(subadminData.total_amount).toFixed(2)
+                : '0.00'}
+            </Text>
+          </View>
+
+          <View style={styles.totalGridItem}>
+            <Text style={styles.totalItemLabel}>Collections</Text>
+            <Text style={styles.totalItemValue}>
+              {subadminData?.total_procurements ?? 0}
+            </Text>
+          </View>
+
+          <View style={styles.totalGridItem}>
+            <Text style={styles.totalItemLabel}>Today's Milk</Text>
+            <Text style={[styles.totalItemValue, { color: COLORS.brandGreen }]}>
+              {subadminData?.today_liters !== undefined
+                ? `${Number(subadminData.today_liters).toFixed(1)} L`
+                : '0.0 L'}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -591,6 +710,30 @@ export default function SubAdminDashboard() {
                       </View>
                     </View>
 
+                    {/* Live Procurement Totals snippet from API */}
+                    {farmerTotalsMap.has(String(item.farmer_id)) ? (
+                      <View style={styles.farmerTotalsSnippet}>
+                        <View style={styles.farmerTotalCol}>
+                          <Text style={styles.farmerTotalSnippetLabel}>Total Milk</Text>
+                          <Text style={styles.farmerTotalSnippetVal}>
+                            {farmerTotalsMap.get(String(item.farmer_id))!.total_liters.toFixed(1)} L
+                          </Text>
+                        </View>
+                        <View style={styles.farmerTotalCol}>
+                          <Text style={styles.farmerTotalSnippetLabel}>Total Paid</Text>
+                          <Text style={[styles.farmerTotalSnippetVal, { color: '#2E7D32' }]}>
+                            ₹{farmerTotalsMap.get(String(item.farmer_id))!.total_amount.toFixed(2)}
+                          </Text>
+                        </View>
+                        <View style={styles.farmerTotalCol}>
+                          <Text style={styles.farmerTotalSnippetLabel}>Entries</Text>
+                          <Text style={styles.farmerTotalSnippetVal}>
+                            {farmerTotalsMap.get(String(item.farmer_id))!.total_procurements}
+                          </Text>
+                        </View>
+                      </View>
+                    ) : null}
+
                     {/* Footer Row */}
                     <View style={styles.farmerCardFooter}>
                       <View style={styles.livestockTag}>
@@ -702,106 +845,106 @@ export default function SubAdminDashboard() {
               keyExtractor={(item) => String(item.animal_id)}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.listContent}
-            renderItem={({ item }) => {
-              const isCow = item.animal_type?.toLowerCase().includes('cow');
+              renderItem={({ item }) => {
+                const isCow = item.animal_type?.toLowerCase().includes('cow');
 
-              return (
-                <TouchableOpacity
-                  style={styles.animalCard}
-                  activeOpacity={0.9}
-                  onPress={() => {
-                    setSelectedAnimal(item);
-                    setModalVisible(true);
-                  }}
-                >
-                  {/* Top Bar */}
-                  <View style={styles.animalTopBar}>
-                    <View style={styles.tagBadge}>
-                      <MaterialCommunityIcons
-                        name="tag-outline"
-                        size={14}
-                        color={COLORS.brandGreen}
-                      />
-                      <Text style={styles.tagBadgeText}>ID: #{item.animal_id}</Text>
-                    </View>
+                return (
+                  <TouchableOpacity
+                    style={styles.animalCard}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      setSelectedAnimal(item);
+                      setModalVisible(true);
+                    }}
+                  >
+                    {/* Top Bar */}
+                    <View style={styles.animalTopBar}>
+                      <View style={styles.tagBadge}>
+                        <MaterialCommunityIcons
+                          name="tag-outline"
+                          size={14}
+                          color={COLORS.brandGreen}
+                        />
+                        <Text style={styles.tagBadgeText}>ID: #{item.animal_id}</Text>
+                      </View>
 
-                    <View
-                      style={[
-                        styles.animalTypeBadge,
-                        isCow ? styles.cowBadge : styles.buffaloBadge,
-                      ]}
-                    >
-                      <MaterialCommunityIcons
-                        name="cow"
-                        size={14}
-                        color={isCow ? '#1F5E4A' : '#455A64'}
-                      />
-                      <Text
+                      <View
                         style={[
-                          styles.animalTypeText,
-                          { color: isCow ? '#1F5E4A' : '#455A64' },
+                          styles.animalTypeBadge,
+                          isCow ? styles.cowBadge : styles.buffaloBadge,
                         ]}
                       >
-                        {item.animal_type}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Animal Info */}
-                  <View style={styles.animalMainRow}>
-                    <View style={styles.animalInfoBlock}>
-                      <Text style={styles.animalOwnerLabel}>Owner / Farmer</Text>
-                      <Text style={styles.animalOwnerName} numberOfLines={1}>
-                        {item.farmer_name} (ID: #{item.farmer_id})
-                      </Text>
-                    </View>
-
-                    <View style={styles.yieldBlock}>
-                      <Text style={styles.yieldValue}>{item.status === '1' ? 'Active' : 'Inactive'}</Text>
-                      <Text style={styles.yieldLabel}>Status</Text>
-                    </View>
-                  </View>
-
-                  {/* Badges / Metrics Row */}
-                  <View style={styles.animalMetaRow}>
-                    <View style={styles.metaChip}>
-                      <Ionicons name="shield-checkmark-outline" size={12} color="#2E7D32" />
-                      <Text style={styles.metaChipText}>
-                        {item.vaccination_proof ? 'Vaccinated' : 'No Proof'}
-                      </Text>
+                        <MaterialCommunityIcons
+                          name="cow"
+                          size={14}
+                          color={isCow ? '#1F5E4A' : '#455A64'}
+                        />
+                        <Text
+                          style={[
+                            styles.animalTypeText,
+                            { color: isCow ? '#1F5E4A' : '#455A64' },
+                          ]}
+                        >
+                          {item.animal_type}
+                        </Text>
+                      </View>
                     </View>
 
-                    <View style={styles.metaChip}>
-                      <Ionicons name="calendar-outline" size={12} color={COLORS.amber} />
-                      <Text style={styles.metaChipText}>{item.created_at ? item.created_at.split(' ')[0] : 'Registered'}</Text>
+                    {/* Animal Info */}
+                    <View style={styles.animalMainRow}>
+                      <View style={styles.animalInfoBlock}>
+                        <Text style={styles.animalOwnerLabel}>Owner / Farmer</Text>
+                        <Text style={styles.animalOwnerName} numberOfLines={1}>
+                          {item.farmer_name} (ID: #{item.farmer_id})
+                        </Text>
+                      </View>
+
+                      <View style={styles.yieldBlock}>
+                        <Text style={styles.yieldValue}>{item.status === '1' ? 'Active' : 'Inactive'}</Text>
+                        <Text style={styles.yieldLabel}>Status</Text>
+                      </View>
                     </View>
 
-                    <View style={styles.viewAnimalDetailsAction}>
-                      <Text style={styles.viewAnimalDetailsText}>Details</Text>
-                      <Ionicons name="chevron-forward" size={12} color={COLORS.brandGreen} />
+                    {/* Badges / Metrics Row */}
+                    <View style={styles.animalMetaRow}>
+                      <View style={styles.metaChip}>
+                        <Ionicons name="shield-checkmark-outline" size={12} color="#2E7D32" />
+                        <Text style={styles.metaChipText}>
+                          {item.vaccination_proof ? 'Vaccinated' : 'No Proof'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.metaChip}>
+                        <Ionicons name="calendar-outline" size={12} color={COLORS.amber} />
+                        <Text style={styles.metaChipText}>{item.created_at ? item.created_at.split(' ')[0] : 'Registered'}</Text>
+                      </View>
+
+                      <View style={styles.viewAnimalDetailsAction}>
+                        <Text style={styles.viewAnimalDetailsText}>Details</Text>
+                        <Ionicons name="chevron-forward" size={12} color={COLORS.brandGreen} />
+                      </View>
                     </View>
-                  </View>
-                </TouchableOpacity>
-              );
-            }}
-            ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <MaterialCommunityIcons
-                  name="cow-off"
-                  size={42}
-                  color={COLORS.textMuted}
-                />
-                <Text style={styles.emptyTitle}>No Animals Found</Text>
-                <Text style={styles.emptySubtitle}>
-                  {animalSearch
-                    ? 'No cattle matches your search criteria.'
-                    : 'No livestock currently registered under your farmers.'}
-                </Text>
-              </View>
-            }
-          />
-        )}
-      </View>
+                  </TouchableOpacity>
+                );
+              }}
+              ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                  <MaterialCommunityIcons
+                    name="cow-off"
+                    size={42}
+                    color={COLORS.textMuted}
+                  />
+                  <Text style={styles.emptyTitle}>No Animals Found</Text>
+                  <Text style={styles.emptySubtitle}>
+                    {animalSearch
+                      ? 'No cattle matches your search criteria.'
+                      : 'No livestock currently registered under your farmers.'}
+                  </Text>
+                </View>
+              }
+            />
+          )}
+        </View>
       )}
 
       {/* ================= ANIMAL DETAILS MODAL ================= */}
@@ -1643,5 +1786,116 @@ const styles = StyleSheet.create({
     color: COLORS.subtitle,
     fontWeight: '500',
     marginTop: 2,
+  },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  profileNavBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#262626',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+  },
+  profileNavBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  procurementTotalsBar: {
+    backgroundColor: COLORS.cardBg,
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 2,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E6DF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  totalsHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    paddingBottom: 6,
+    borderBottomWidth: 0.8,
+    borderBottomColor: '#EEF0EC',
+  },
+  totalsTitleWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  totalsBarTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.headline,
+  },
+  totalsLiveBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.brandGreen,
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    letterSpacing: 0.5,
+  },
+  totalsGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  totalGridItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  totalItemLabel: {
+    fontSize: 11,
+    color: COLORS.subtitle,
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  totalItemValue: {
+    fontSize: 13.5,
+    fontWeight: '800',
+    color: COLORS.headline,
+  },
+  farmerTotalsSnippet: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F6F2',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginBottom: 8,
+    justifyContent: 'space-around',
+    borderWidth: 0.6,
+    borderColor: '#E2E8DE',
+  },
+  farmerTotalCol: {
+    alignItems: 'center',
+  },
+  farmerTotalSnippetLabel: {
+    fontSize: 10,
+    color: COLORS.subtitle,
+    fontWeight: '500',
+  },
+  farmerTotalSnippetVal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.headline,
+    marginTop: 1,
   },
 });
